@@ -13,6 +13,7 @@ type Env struct {
 	AccessTokenExpiryHour int    `mapstructure:"ACCESS_TOKEN_EXPIRY_HOUR"`
 	AccessTokenSecret     string `mapstructure:"ACCESS_TOKEN_SECRET"`
 	RefreshTokenSecret    string `mapstructure:"REFRESH_TOKEN_SECRET"`
+	FrontendUrl           string `mapstructure:"FRONTEND_URL"`
 }
 
 func NewEnv() *Env {

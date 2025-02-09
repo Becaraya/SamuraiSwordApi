@@ -1,11 +1,12 @@
-FROM golang:1.19-alpine
-
-RUN mkdir /app
-
-ADD . /app
+FROM golang:1.23-alpine
 
 WORKDIR /app
 
-RUN go build -o main cmd/main.go
+COPY . .
 
-CMD ["/app/main"]
+RUN go mod download
+RUN go build -o main ./cmd/main.go
+
+EXPOSE 8080
+
+CMD ["./main"]
