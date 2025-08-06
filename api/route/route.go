@@ -1,26 +1,29 @@
 package route
 
 import (
-	"time"
+    "time"
 
-	"github.com/becaraya/katana-api/api/handler"
-	"github.com/becaraya/katana-api/api/middleware"
-	"github.com/becaraya/katana-api/internal/bootstrap"
+    "github.com/becaraya/katana-api/api/handler"
+    "github.com/becaraya/katana-api/api/middleware"
+    "github.com/becaraya/katana-api/internal/bootstrap"
 
-	"github.com/gin-gonic/gin"
+    "github.com/gin-gonic/gin"
 )
 
 func Setup(env *bootstrap.Env, timeout time.Duration, gin *gin.Engine) {
-	publicRouter := gin.Group("")
-	{
-		publicRouter.POST("/login", handler.Login(env))
-		publicRouter.GET("/ws", middleware.WebSocketHandler)
+    publicRouter := gin.Group("")
+    {
+        publicRouter.POST("/login", handler.Login(env))
+        publicRouter.GET("/ws", middleware.WebSocketHandler)
+    }
 
-	}
-
-	protectedRouter := gin.Group("")
-	protectedRouter.Use(middleware.JWTAuthMiddleware(env.AccessTokenSecret))
-	{
-		protectedRouter.GET("/tokens", handler.ListTokens)
-	}
+    protectedRouter := gin.Group("")
+    protectedRouter.Use(middleware.JWTAuthMiddleware(env.AccessTokenSecret))
+    {
+        protectedRouter.GET("/tokens", handler.ListTokens)
+        protectedRouter.GET("/game", handler.GetGameState)
+        protectedRouter.POST("/game/join", handler.JoinGame)
+        protectedRouter.POST("/game/leave", handler.LeaveGame)
+        protectedRouter.POST("/game/start", handler.StartGame)
+    }
 }
