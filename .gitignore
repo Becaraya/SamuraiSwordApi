@@ -7,3 +7,6 @@ bin/
 **/_*
 main.exe
 main
+tmp/
+build-errors.log
+*.log

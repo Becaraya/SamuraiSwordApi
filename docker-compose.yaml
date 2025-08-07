@@ -11,3 +11,19 @@ services:
     env_file: .env
     ports:
       - "$PORT:$PORT"
+    develop:
+      watch:
+        - action: rebuild
+          path: ./go.mod
+        - action: rebuild
+          path: ./go.sum
+        - action: sync
+          path: .
+          target: /app
+          ignore:
+            - tmp/
+            - .git/
+            - .env
+            - README.md
+            - Dockerfile*
+            - docker-compose.yaml

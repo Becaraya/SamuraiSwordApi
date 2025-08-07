@@ -40,16 +40,16 @@ cp .env.example .env
 
 ```bash
 # Construction et démarrage
-docker-compose up --build
+docker compose up --build
 
-# En arrière-plan
-docker-compose up -d --build
+# Compatible avec Docker Watch
+docker compose up --build --watch
 
 # Voir les logs
-docker-compose logs -f
+docker compose logs -f
 
 # Arrêt
-docker-compose down
+docker compose down
 ```
 
 ## 💻 Démarrage en développement sans Docker
