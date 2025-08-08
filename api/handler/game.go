@@ -123,6 +123,16 @@ func StartGame(c *gin.Context) {
 		return
 	}
 
+	players := currentGame.GetPlayers()
+	if len(players) < 3 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":            "Minimum 3 players required to start the game",
+			"current_players":  len(players),
+			"minimum_required": 3,
+		})
+		return
+	}
+
 	if !currentGame.StartGame() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot start game"})
 		return
