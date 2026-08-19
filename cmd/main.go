@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"github.com/becaraya/katana-api/api/middleware"
 	route "github.com/becaraya/katana-api/api/route"
 
 	"github.com/becaraya/katana-api/internal/bootstrap"
@@ -16,6 +17,8 @@ func main() {
 	app := bootstrap.App()
 
 	env := app.Env
+
+	middleware.SetJWTSecret(env.AccessTokenSecret)
 
 	timeout := time.Duration(env.ContextTimeout) * time.Second
 

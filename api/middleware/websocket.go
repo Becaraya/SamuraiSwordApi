@@ -13,7 +13,7 @@ import (
 var (
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
-			return true // Permettre toutes les origines pour le développement
+			return true
 		},
 	}
 
@@ -23,7 +23,13 @@ var (
 
 	connectedUsers      = make(map[string]bool)
 	connectedUsersMutex sync.RWMutex
+
+	jwtSecret string
 )
+
+func SetJWTSecret(secret string) {
+	jwtSecret = secret
+}
 
 // Message structure pour WebSocket
 type WSMessage struct {
@@ -41,19 +47,16 @@ func WebSocketHandler(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	// Ajouter la connexion à la liste
 	connectionsMutex.Lock()
 	connections[conn] = ""
 	connectionsMutex.Unlock()
 
-	// Nettoyer la connexion à la fermeture
 	defer func() {
 		connectionsMutex.Lock()
 		username := connections[conn]
 		delete(connections, conn)
 		connectionsMutex.Unlock()
 
-		// Supprimer de la liste des utilisateurs connectés
 		if username != "" {
 			connectedUsersMutex.Lock()
 			delete(connectedUsers, username)
@@ -63,7 +66,6 @@ func WebSocketHandler(c *gin.Context) {
 		}
 	}()
 
-	// Écouter les messages entrants
 	for {
 		var message WSMessage
 		err := conn.ReadJSON(&message)
@@ -72,32 +74,40 @@ func WebSocketHandler(c *gin.Context) {
 			break
 		}
 
-		// Traiter le message selon son type
 		handleWebSocketMessage(conn, message)
 	}
 }
 
-// Traiter les messages WebSocket entrants
 func handleWebSocketMessage(conn *websocket.Conn, message WSMessage) {
 	switch message.Type {
 	case "auth":
-		// Authentifier l'utilisateur et associer le username à la connexion
-		if data, ok := message.Data.(map[string]interface{}); ok {
-			if username, exists := data["username"]; exists {
-				connectionsMutex.Lock()
-				connections[conn] = username.(string)
-				connectionsMutex.Unlock()
-
-				log.Printf("Utilisateur %s connecté via WebSocket", username)
-
-				connectedUsersMutex.Lock()
-				connectedUsers[username.(string)] = true
-				connectedUsersMutex.Unlock()
-			}
+		data, ok := message.Data.(map[string]interface{})
+		if !ok {
+			return
+		}
+		tokenString, ok := data["token"].(string)
+		if !ok || tokenString == "" {
+			log.Printf("Authentification WebSocket refusée: token manquant")
+			return
+		}
+		claims, err := ValidateToken(tokenString, jwtSecret)
+		if err != nil {
+			log.Printf("Authentification WebSocket refusée: %v", err)
+			return
 		}
 
+		username := claims.Username
+		connectionsMutex.Lock()
+		connections[conn] = username
+		connectionsMutex.Unlock()
+
+		log.Printf("Utilisateur %s connecté via WebSocket", username)
+
+		connectedUsersMutex.Lock()
+		connectedUsers[username] = true
+		connectedUsersMutex.Unlock()
+
 	case "join_game":
-		// Diffuser l'information que quelqu'un a rejoint
 		if data, ok := message.Data.(map[string]interface{}); ok {
 			if username, exists := data["username"]; exists {
 				broadcastMessage := WSMessage{
@@ -113,7 +123,6 @@ func handleWebSocketMessage(conn *websocket.Conn, message WSMessage) {
 		}
 
 	case "leave_game":
-		// Diffuser l'information que quelqu'un a quitté
 		if data, ok := message.Data.(map[string]interface{}); ok {
 			if username, exists := data["username"]; exists {
 				broadcastMessage := WSMessage{
@@ -129,7 +138,6 @@ func handleWebSocketMessage(conn *websocket.Conn, message WSMessage) {
 		}
 
 	case "start_game":
-		// Diffuser le démarrage du jeu
 		if data, ok := message.Data.(map[string]interface{}); ok {
 			if username, exists := data["username"]; exists {
 				broadcastMessage := WSMessage{
@@ -146,7 +154,6 @@ func handleWebSocketMessage(conn *websocket.Conn, message WSMessage) {
 	}
 }
 
-// BroadcastToAll diffuse un message à toutes les connexions actives
 func BroadcastToAll(message WSMessage) {
 	connectionsMutex.RLock()
 	defer connectionsMutex.RUnlock()
@@ -161,13 +168,11 @@ func BroadcastToAll(message WSMessage) {
 		err := conn.WriteMessage(websocket.TextMessage, messageBytes)
 		if err != nil {
 			log.Printf("Erreur lors de l'envoi du message WebSocket: %v", err)
-			// Supprimer la connexion fermée
 			delete(connections, conn)
 		}
 	}
 }
 
-// BroadcastMessage fonction utilitaire pour broadcaster des messages JSON
 func BroadcastMessage(messageBytes []byte) {
 	connectionsMutex.RLock()
 	defer connectionsMutex.RUnlock()
@@ -181,7 +186,6 @@ func BroadcastMessage(messageBytes []byte) {
 	}
 }
 
-// GetActiveConnections retourne le nombre de connexions actives
 func GetActiveConnections() int {
 	connectionsMutex.RLock()
 	defer connectionsMutex.RUnlock()

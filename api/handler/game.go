@@ -17,7 +17,6 @@ type LeaveGameRequest struct {
 	Username string `json:"username" binding:"required"`
 }
 
-// JoinGame permet à un joueur de rejoindre la partie
 func JoinGame(c *gin.Context) {
 	var req JoinGameRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -26,6 +25,12 @@ func JoinGame(c *gin.Context) {
 	}
 
 	gameManager := game.GetGameManager()
+
+	if existingGame := gameManager.GetCurrentGame(); existingGame != nil && existingGame.State != game.GameStateWaiting {
+		c.JSON(http.StatusConflict, gin.H{"error": "game already in progress", "code": "GAME_IN_PROGRESS"})
+		return
+	}
+
 	player, success := gameManager.JoinCurrentGame(req.Username)
 
 	if !success {
@@ -124,11 +129,11 @@ func StartGame(c *gin.Context) {
 	}
 
 	players := currentGame.GetPlayers()
-	if len(players) < 3 {
+	if len(players) < game.MinPlayers {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error":            "Minimum 3 players required to start the game",
+			"error":            "Minimum players required to start the game",
 			"current_players":  len(players),
-			"minimum_required": 3,
+			"minimum_required": game.MinPlayers,
 		})
 		return
 	}

@@ -30,6 +30,13 @@ func (s *TokenStore) GetTokens() map[string]time.Time {
 	return s.tokens
 }
 
+func (s *TokenStore) IsTokenValid(username string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	expiry, exists := s.tokens[username]
+	return exists && time.Now().Before(expiry)
+}
+
 func (s *TokenStore) cleanupExpiredTokens() {
 	for {
 		time.Sleep(1 * time.Hour) // Run cleanup every hour

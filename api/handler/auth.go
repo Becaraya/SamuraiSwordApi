@@ -24,9 +24,15 @@ func Login(env *bootstrap.Env) gin.HandlerFunc {
 			return
 		}
 
+		if tokenStore.IsTokenValid(loginReq.Username) {
+			c.JSON(http.StatusConflict, gin.H{"error": "username already in use"})
+			return
+		}
+
 		// Generate JWT token
-		expiry := time.Now().Add(24 * time.Hour)
-		tokenString, err := middleware.GenerateToken(loginReq.Username, env.AccessTokenSecret, 24*time.Hour)
+		expiryDuration := time.Duration(env.AccessTokenExpiryHour) * time.Hour
+		expiry := time.Now().Add(expiryDuration)
+		tokenString, err := middleware.GenerateToken(loginReq.Username, env.AccessTokenSecret, expiryDuration)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not generate token"})
 			return
