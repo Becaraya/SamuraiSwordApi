@@ -24,6 +24,12 @@ func (s *TokenStore) AddToken(username string, expiry time.Time) {
 	s.tokens[username] = expiry
 }
 
+func (s *TokenStore) RemoveToken(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.tokens, username)
+}
+
 func (s *TokenStore) GetTokens() map[string]time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()

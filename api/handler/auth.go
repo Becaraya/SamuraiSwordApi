@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -24,7 +23,8 @@ func Login(env *bootstrap.Env) gin.HandlerFunc {
 			return
 		}
 
-		if tokenStore.IsTokenValid(loginReq.Username) {
+		// Un pseudo reste réutilisable tant que son détenteur n'est pas connecté.
+		if tokenStore.IsTokenValid(loginReq.Username) && middleware.IsUserConnected(loginReq.Username) {
 			c.JSON(http.StatusConflict, gin.H{"error": "username already in use"})
 			return
 		}
@@ -41,12 +41,18 @@ func Login(env *bootstrap.Env) gin.HandlerFunc {
 		// Store token in memory
 		tokenStore.AddToken(loginReq.Username, expiry)
 
-		// Broadcast new user
-		message, _ := json.Marshal(map[string]string{"username": loginReq.Username, "expiry": expiry.String()})
-		middleware.BroadcastMessage(message)
-
 		c.JSON(http.StatusOK, gin.H{"token": tokenString})
 	}
+}
+
+// Logout libère le pseudo et retire le joueur du lobby.
+func Logout(c *gin.Context) {
+	username := c.GetString("username")
+	tokenStore.RemoveToken(username)
+	if removePlayer(username) {
+		broadcastGameUpdate("player_left", username)
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Logged out"})
 }
 
 func ListTokens(c *gin.Context) {

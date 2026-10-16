@@ -56,6 +56,17 @@ func (gm *GameManager) GetOrCreateCurrentGame(createdBy string) *Game {
 	return gm.current
 }
 
+// ResetIfEmpty supprime la partie courante si plus aucun joueur n'y est présent
+func (gm *GameManager) ResetIfEmpty() {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	if gm.current != nil && len(gm.current.GetPlayers()) == 0 {
+		delete(gm.games, gm.current.ID)
+		gm.current = nil
+	}
+}
+
 // JoinCurrentGame fait rejoindre un joueur à la partie actuelle
 func (gm *GameManager) JoinCurrentGame(playerName string) (*Player, bool) {
 	gm.mu.Lock()

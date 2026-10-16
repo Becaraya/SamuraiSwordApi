@@ -16,6 +16,7 @@ const (
 )
 
 const MinPlayers = 3
+const MaxPlayers = 7
 
 // Player représente un joueur dans le jeu
 type Player struct {
@@ -45,7 +46,7 @@ func NewGame(createdBy string) *Game {
 		Players:    make(map[string]*Player),
 		CreatedBy:  createdBy,
 		CreatedAt:  time.Now(),
-		MaxPlayers: 7, // Maximum 7 joueurs selon votre interface
+		MaxPlayers: MaxPlayers,
 	}
 }
 
@@ -109,6 +110,22 @@ func (g *Game) GetPlayers() map[string]*Player {
 		players[name] = player
 	}
 	return players
+}
+
+// Host retourne le joueur arrivé en premier (l'hôte du lobby), ou "" si la partie est vide
+func (g *Game) Host() string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	host := ""
+	var earliest time.Time
+	for name, player := range g.Players {
+		if host == "" || player.JoinedAt.Before(earliest) {
+			host = name
+			earliest = player.JoinedAt
+		}
+	}
+	return host
 }
 
 // StartGame démarre la partie

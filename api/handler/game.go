@@ -1,127 +1,121 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/becaraya/katana-api/api/middleware"
 	"github.com/becaraya/katana-api/internal/game"
 	"github.com/gin-gonic/gin"
 )
 
-type JoinGameRequest struct {
-	Username string `json:"username" binding:"required"`
+// disconnectGracePeriod laisse le temps à un joueur de recharger la page sans perdre sa place.
+const disconnectGracePeriod = 15 * time.Second
+
+// gameSnapshot construit l'état complet du lobby envoyé aux clients (HTTP et WebSocket).
+func gameSnapshot() gin.H {
+	currentGame := game.GetGameManager().GetCurrentGame()
+
+	snapshot := gin.H{
+		"game":            currentGame,
+		"players":         make(map[string]*game.Player),
+		"host":            "",
+		"min_players":     game.MinPlayers,
+		"max_players":     game.MaxPlayers,
+		"connected_users": middleware.GetConnectedUsernames(),
+	}
+	if currentGame != nil {
+		snapshot["players"] = currentGame.GetPlayers()
+		snapshot["host"] = currentGame.Host()
+	}
+	return snapshot
 }
 
-type LeaveGameRequest struct {
-	Username string `json:"username" binding:"required"`
+func broadcastGameUpdate(event, username string) {
+	data := gameSnapshot()
+	data["event"] = event
+	middleware.BroadcastToAll(middleware.WSMessage{Type: "game_update", Data: data, From: username})
+}
+
+// removePlayer retire un joueur de la partie courante et réinitialise le lobby s'il est vide.
+func removePlayer(username string) bool {
+	gameManager := game.GetGameManager()
+	currentGame := gameManager.GetCurrentGame()
+	if currentGame == nil || !currentGame.RemovePlayer(username) {
+		return false
+	}
+	gameManager.ResetIfEmpty()
+	return true
+}
+
+// HandleDisconnect retire un joueur du lobby s'il ne se reconnecte pas rapidement.
+func HandleDisconnect(username string) {
+	time.AfterFunc(disconnectGracePeriod, func() {
+		if middleware.IsUserConnected(username) {
+			return
+		}
+		currentGame := game.GetGameManager().GetCurrentGame()
+		if currentGame == nil || currentGame.State != game.GameStateWaiting {
+			return
+		}
+		if removePlayer(username) {
+			broadcastGameUpdate("player_left", username)
+		}
+	})
 }
 
 func JoinGame(c *gin.Context) {
-	var req JoinGameRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
+	username := c.GetString("username")
 	gameManager := game.GetGameManager()
 
-	if existingGame := gameManager.GetCurrentGame(); existingGame != nil && existingGame.State != game.GameStateWaiting {
-		c.JSON(http.StatusConflict, gin.H{"error": "game already in progress", "code": "GAME_IN_PROGRESS"})
-		return
+	if existingGame := gameManager.GetCurrentGame(); existingGame != nil {
+		if player, alreadyIn := existingGame.GetPlayers()[username]; alreadyIn {
+			c.JSON(http.StatusOK, gin.H{"message": "Already in game", "player": player, "game": existingGame})
+			return
+		}
+		if existingGame.State != game.GameStateWaiting {
+			c.JSON(http.StatusConflict, gin.H{"error": "game already in progress", "code": "GAME_IN_PROGRESS"})
+			return
+		}
 	}
 
-	player, success := gameManager.JoinCurrentGame(req.Username)
-
+	player, success := gameManager.JoinCurrentGame(username)
 	if !success {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not join game"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not join game (full or already started)", "code": "JOIN_FAILED"})
 		return
 	}
 
-	// Broadcaster la mise à jour du jeu
-	currentGame := gameManager.GetCurrentGame()
-	message, _ := json.Marshal(map[string]interface{}{
-		"type":    "game_update",
-		"game":    currentGame,
-		"players": currentGame.GetPlayers(),
-	})
-	middleware.BroadcastMessage(message)
+	broadcastGameUpdate("player_joined", username)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Successfully joined game",
 		"player":  player,
-		"game":    currentGame,
+		"game":    gameManager.GetCurrentGame(),
 	})
 }
 
 func LeaveGame(c *gin.Context) {
-	var req LeaveGameRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+	username := c.GetString("username")
 
-	gameManager := game.GetGameManager()
-	currentGame := gameManager.GetCurrentGame()
-
-	if currentGame == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No active game"})
-		return
-	}
-
-	success := currentGame.RemovePlayer(req.Username)
-	if !success {
+	if !removePlayer(username) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Player not in game"})
 		return
 	}
 
-	// Broadcaster la mise à jour du jeu
-	broadcastMessage := middleware.WSMessage{
-		Type: "game_update",
-		Data: map[string]interface{}{
-			"game":    currentGame,
-			"players": currentGame.GetPlayers(),
-			"event":   "player_left",
-			"message": req.Username + " a quitté la partie!",
-		},
-		From: req.Username,
-	}
-	middleware.BroadcastToAll(broadcastMessage)
+	broadcastGameUpdate("player_left", username)
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Successfully left game",
-		"game":    currentGame,
-		"players": currentGame.GetPlayers(),
-	})
+	c.JSON(http.StatusOK, gin.H{"message": "Successfully left game"})
 }
 
 // GetGameState retourne l'état actuel du jeu
 func GetGameState(c *gin.Context) {
-	gameManager := game.GetGameManager()
-	currentGame := gameManager.GetCurrentGame()
-
-	connectedUsers := middleware.GetConnectedUsernames()
-
-	if currentGame == nil {
-		c.JSON(http.StatusOK, gin.H{
-			"game":            nil,
-			"players":         make(map[string]*game.Player),
-			"connected_users": connectedUsers,
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"game":            currentGame,
-		"players":         currentGame.GetPlayers(),
-		"connected_users": connectedUsers,
-	})
+	c.JSON(http.StatusOK, gameSnapshot())
 }
 
-// StartGame démarre la partie
+// StartGame démarre la partie (réservé à l'hôte)
 func StartGame(c *gin.Context) {
-	gameManager := game.GetGameManager()
-	currentGame := gameManager.GetCurrentGame()
+	username := c.GetString("username")
+	currentGame := game.GetGameManager().GetCurrentGame()
 
 	if currentGame == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No active game"})
@@ -129,6 +123,16 @@ func StartGame(c *gin.Context) {
 	}
 
 	players := currentGame.GetPlayers()
+	if _, inGame := players[username]; !inGame {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not in this game"})
+		return
+	}
+
+	if currentGame.Host() != username {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Only the host can start the game", "code": "NOT_HOST"})
+		return
+	}
+
 	if len(players) < game.MinPlayers {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":            "Minimum players required to start the game",
@@ -143,12 +147,7 @@ func StartGame(c *gin.Context) {
 		return
 	}
 
-	// Broadcaster le démarrage du jeu
-	message, _ := json.Marshal(map[string]interface{}{
-		"type": "game_started",
-		"game": currentGame,
-	})
-	middleware.BroadcastMessage(message)
+	broadcastGameUpdate("game_started", username)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Game started successfully",

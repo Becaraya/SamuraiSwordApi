@@ -25,10 +25,30 @@ var (
 	connectedUsersMutex sync.RWMutex
 
 	jwtSecret string
+
+	onDisconnect func(username string)
 )
 
 func SetJWTSecret(secret string) {
 	jwtSecret = secret
+}
+
+// SetDisconnectHandler définit le callback appelé quand un utilisateur perd sa dernière connexion.
+func SetDisconnectHandler(handler func(username string)) {
+	onDisconnect = handler
+}
+
+func IsUserConnected(username string) bool {
+	connectedUsersMutex.RLock()
+	defer connectedUsersMutex.RUnlock()
+	return connectedUsers[username]
+}
+
+func broadcastPresence() {
+	BroadcastToAll(WSMessage{
+		Type: "presence",
+		Data: map[string]interface{}{"connected_users": GetConnectedUsernames()},
+	})
 }
 
 // Message structure pour WebSocket
@@ -55,14 +75,28 @@ func WebSocketHandler(c *gin.Context) {
 		connectionsMutex.Lock()
 		username := connections[conn]
 		delete(connections, conn)
+		// Un rechargement de page peut ouvrir la nouvelle connexion avant la fermeture de l'ancienne.
+		stillConnected := false
+		for _, other := range connections {
+			if other == username {
+				stillConnected = true
+				break
+			}
+		}
 		connectionsMutex.Unlock()
 
-		if username != "" {
-			connectedUsersMutex.Lock()
-			delete(connectedUsers, username)
-			connectedUsersMutex.Unlock()
+		if username == "" || stillConnected {
+			return
+		}
 
-			log.Printf("Utilisateur %s déconnecté", username)
+		connectedUsersMutex.Lock()
+		delete(connectedUsers, username)
+		connectedUsersMutex.Unlock()
+
+		log.Printf("Utilisateur %s déconnecté", username)
+		broadcastPresence()
+		if onDisconnect != nil {
+			onDisconnect(username)
 		}
 	}()
 
@@ -107,56 +141,14 @@ func handleWebSocketMessage(conn *websocket.Conn, message WSMessage) {
 		connectedUsers[username] = true
 		connectedUsersMutex.Unlock()
 
-	case "join_game":
-		if data, ok := message.Data.(map[string]interface{}); ok {
-			if username, exists := data["username"]; exists {
-				broadcastMessage := WSMessage{
-					Type: "player_joined",
-					Data: map[string]interface{}{
-						"username": username,
-						"message":  username.(string) + " a rejoint la partie!",
-					},
-					From: username.(string),
-				}
-				BroadcastToAll(broadcastMessage)
-			}
-		}
-
-	case "leave_game":
-		if data, ok := message.Data.(map[string]interface{}); ok {
-			if username, exists := data["username"]; exists {
-				broadcastMessage := WSMessage{
-					Type: "player_left",
-					Data: map[string]interface{}{
-						"username": username,
-						"message":  username.(string) + " a quitté la partie!",
-					},
-					From: username.(string),
-				}
-				BroadcastToAll(broadcastMessage)
-			}
-		}
-
-	case "start_game":
-		if data, ok := message.Data.(map[string]interface{}); ok {
-			if username, exists := data["username"]; exists {
-				broadcastMessage := WSMessage{
-					Type: "game_starting",
-					Data: map[string]interface{}{
-						"username": username,
-						"message":  "La partie va commencer...",
-					},
-					From: username.(string),
-				}
-				BroadcastToAll(broadcastMessage)
-			}
-		}
+		broadcastPresence()
 	}
 }
 
+// BroadcastToAll envoie un message à toutes les connexions (Lock: les écritures WebSocket doivent être sérialisées).
 func BroadcastToAll(message WSMessage) {
-	connectionsMutex.RLock()
-	defer connectionsMutex.RUnlock()
+	connectionsMutex.Lock()
+	defer connectionsMutex.Unlock()
 
 	messageBytes, err := json.Marshal(message)
 	if err != nil {
@@ -174,8 +166,8 @@ func BroadcastToAll(message WSMessage) {
 }
 
 func BroadcastMessage(messageBytes []byte) {
-	connectionsMutex.RLock()
-	defer connectionsMutex.RUnlock()
+	connectionsMutex.Lock()
+	defer connectionsMutex.Unlock()
 
 	for conn := range connections {
 		err := conn.WriteMessage(websocket.TextMessage, messageBytes)
