@@ -92,9 +92,8 @@ go run cmd/main.go
 
 ### Clés secrètes
 ```bash
-# Générer des clés robustes
-openssl rand -base64 32  # Pour ACCESS_TOKEN_SECRET
-openssl rand -base64 32  # Pour REFRESH_TOKEN_SECRET
+openssl rand -base64 32
+
 ```
 
 ## 🚀 Déploiement en Production

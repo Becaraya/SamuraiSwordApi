@@ -1,7 +1,9 @@
 package game
 
 import (
+	"fmt"
 	"sync"
+	"time"
 )
 
 // GameManager gère toutes les parties en cours
@@ -62,6 +64,56 @@ func (gm *GameManager) ResetIfEmpty() {
 	defer gm.mu.Unlock()
 
 	if gm.current != nil && len(gm.current.GetPlayers()) == 0 {
+		delete(gm.games, gm.current.ID)
+		gm.current = nil
+	}
+}
+
+// CreateDebugGame remplace la partie courante par une partie de test : l'hôte réel + des bots jusqu'à `total` joueurs.
+func (gm *GameManager) CreateDebugGame(host string, total int, start bool) *Game {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	if total < MinPlayers {
+		total = MinPlayers
+	}
+	if total > MaxPlayers {
+		total = MaxPlayers
+	}
+
+	if gm.current != nil {
+		delete(gm.games, gm.current.ID)
+	}
+
+	g := NewGame(host)
+	now := time.Now()
+
+	// JoinedAt croissant pour que l'hôte réel reste le premier arrivé.
+	hostPlayer := NewPlayer(host, 0)
+	hostPlayer.JoinedAt = now
+	g.AddPlayer(hostPlayer)
+
+	for i := 1; i < total; i++ {
+		bot := NewPlayer(fmt.Sprintf("%s%d", BotPrefix, i), 0)
+		bot.JoinedAt = now.Add(time.Duration(i) * time.Millisecond)
+		g.AddPlayer(bot)
+	}
+
+	if start {
+		g.StartGame()
+	}
+
+	gm.games[g.ID] = g
+	gm.current = g
+	return g
+}
+
+// DeleteCurrentGame supprime la partie courante
+func (gm *GameManager) DeleteCurrentGame() {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	if gm.current != nil {
 		delete(gm.games, gm.current.ID)
 		gm.current = nil
 	}

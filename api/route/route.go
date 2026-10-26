@@ -28,5 +28,11 @@ func Setup(env *bootstrap.Env, timeout time.Duration, gin *gin.Engine) {
 		protectedRouter.POST("/game/join", handler.JoinGame)
 		protectedRouter.POST("/game/leave", handler.LeaveGame)
 		protectedRouter.POST("/game/start", handler.StartGame)
+
+		// Routes de test, jamais exposées hors développement
+		if env.AppEnv == "development" {
+			protectedRouter.POST("/debug/game", handler.DebugCreateGame)
+			protectedRouter.DELETE("/debug/game", handler.DebugDeleteGame)
+		}
 	}
 }

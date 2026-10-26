@@ -18,6 +18,9 @@ const (
 const MinPlayers = 3
 const MaxPlayers = 7
 
+// BotPrefix préfixe les joueurs fictifs créés par le mode debug
+const BotPrefix = "Bot-"
+
 // Player représente un joueur dans le jeu
 type Player struct {
 	Name     string    `json:"name"`
