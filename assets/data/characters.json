@@ -1,0 +1,76 @@
+{
+  "personnages": [
+    {
+      "id": "benkei",
+      "nom": "Benkei",
+      "points_de_vie": 5,
+      "capacite": "Les autres joueurs vous attaquent avec une difficulté augmentée de 1."
+    },
+    {
+      "id": "chiyome",
+      "nom": "Chiyome",
+      "points_de_vie": 4,
+      "capacite": "Seules les armes peuvent vous faire perdre des points de vie. Vous n'êtes donc pas affecté par Cri de guerre ou Ju Jitsu."
+    },
+    {
+      "id": "ginchiyo",
+      "nom": "Ginchiyo",
+      "points_de_vie": 4,
+      "capacite": "Vous réduisez de 1 les dégâts des armes (minimum 1). Par exemple, un Nodachi vous cause 2 dégâts au lieu de 3 mais un Shuriken vous cause tout de même 1 dégât."
+    },
+    {
+      "id": "goemon",
+      "nom": "Goemon",
+      "points_de_vie": 5,
+      "capacite": "Vous pouvez jouer 1 arme supplémentaire par tour. Par exemple, avec une carte Concentration en jeu, vous pouvez jouer 3 armes par tour."
+    },
+    {
+      "id": "hanzo",
+      "nom": "Hanzō",
+      "points_de_vie": 4,
+      "capacite": "Vous pouvez jouer vos cartes d'arme comme des parades (à moins que ce soit votre dernière carte en main). Vous pouvez aussi utiliser cette capacité contre un Cri de guerre."
+    },
+    {
+      "id": "hideyoshi",
+      "nom": "Hideyoshi",
+      "points_de_vie": 4,
+      "capacite": "Durant votre phase de pioche, piochez 1 carte supplémentaire (donc normalement 3 cartes au lieu de 2)."
+    },
+    {
+      "id": "ieyasu",
+      "nom": "Ieyasu",
+      "points_de_vie": 5,
+      "capacite": "Durant votre phase de pioche, vous pouvez prendre la carte du dessus de la défausse au lieu de piocher votre première carte. Vous devez piocher normalement la deuxième (et les suivantes si besoin)."
+    },
+    {
+      "id": "kojiro",
+      "nom": "Kojirō",
+      "points_de_vie": 5,
+      "capacite": "Vos armes peuvent attaquer n'importe quel autre joueur sans tenir compte de la difficulté."
+    },
+    {
+      "id": "musashi",
+      "nom": "Musashi",
+      "points_de_vie": 5,
+      "capacite": "Vos armes causent 1 dégât supplémentaire. N'augmente pas les dégâts des autres cartes (Ju Jitsu par exemple)."
+    },
+    {
+      "id": "nobunaga",
+      "nom": "Nobunaga",
+      "points_de_vie": 5,
+      "capacite": "Durant votre tour, vous pouvez perdre 1 point de vie (sauf votre dernier) pour piocher 1 carte."
+    },
+    {
+      "id": "tomoe",
+      "nom": "Tomoe",
+      "points_de_vie": 5,
+      "capacite": "Chaque fois qu'une de vos armes blesse un joueur, piochez 1 carte. Une seule carte par attaque, même si l'arme cause plusieurs points de dégâts."
+    },
+    {
+      "id": "ushiwaka",
+      "nom": "Ushiwaka",
+      "points_de_vie": 4,
+      "capacite": "Chaque fois que vous perdez 1 point de vie à cause d'une arme, piochez 1 carte (donc si vous perdez 3 points de vie, vous piochez 3 cartes)."
+    }
+  ]
+}

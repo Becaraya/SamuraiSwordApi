@@ -1,0 +1,192 @@
+{
+  "cartes": [
+    {
+      "id": "bo",
+      "nom": "Bō",
+      "categorie": "arme",
+      "quantite": 5,
+      "precision": 2,
+      "degats": 1
+    },
+    {
+      "id": "bokken",
+      "nom": "Bokken",
+      "categorie": "arme",
+      "quantite": 6,
+      "precision": 1,
+      "degats": 1
+    },
+    {
+      "id": "daikyu",
+      "nom": "Daikyū",
+      "categorie": "arme",
+      "quantite": 1,
+      "precision": 5,
+      "degats": 2
+    },
+    {
+      "id": "kanabo",
+      "nom": "Kanabō",
+      "categorie": "arme",
+      "quantite": 1,
+      "precision": 3,
+      "degats": 2
+    },
+    {
+      "id": "katana",
+      "nom": "Katana",
+      "categorie": "arme",
+      "quantite": 1,
+      "precision": 2,
+      "degats": 3
+    },
+    {
+      "id": "kiseru",
+      "nom": "Kiseru",
+      "categorie": "arme",
+      "quantite": 5,
+      "precision": 1,
+      "degats": 2
+    },
+    {
+      "id": "kusarigama",
+      "nom": "Kusarigama",
+      "categorie": "arme",
+      "quantite": 4,
+      "precision": 2,
+      "degats": 2
+    },
+    {
+      "id": "nagayari",
+      "nom": "Nagayari",
+      "categorie": "arme",
+      "quantite": 1,
+      "precision": 4,
+      "degats": 2
+    },
+    {
+      "id": "naginata",
+      "nom": "Naginata",
+      "categorie": "arme",
+      "quantite": 2,
+      "precision": 4,
+      "degats": 1
+    },
+    {
+      "id": "nodachi",
+      "nom": "Nodachi",
+      "categorie": "arme",
+      "quantite": 1,
+      "precision": 3,
+      "degats": 3
+    },
+    {
+      "id": "shuriken",
+      "nom": "Shuriken",
+      "categorie": "arme",
+      "quantite": 3,
+      "precision": 3,
+      "degats": 1
+    },
+    {
+      "id": "tanegashima",
+      "nom": "Tanegashima",
+      "categorie": "arme",
+      "quantite": 1,
+      "precision": 5,
+      "degats": 1
+    },
+    {
+      "id": "wakizashi",
+      "nom": "Wakizashi",
+      "categorie": "arme",
+      "quantite": 1,
+      "precision": 1,
+      "degats": 3
+    },
+    {
+      "id": "armure",
+      "nom": "Armure",
+      "categorie": "permanente",
+      "quantite": 4,
+      "effet": "Les autres joueurs vous attaquent avec une difficulté augmentée de 1. Les bonus de plusieurs armures se cumulent. Les joueurs situés au-delà de vous sont attaqués normalement."
+    },
+    {
+      "id": "attaque_rapide",
+      "nom": "Attaque rapide",
+      "categorie": "permanente",
+      "quantite": 3,
+      "effet": "Vos armes causent 1 dégât supplémentaire par carte Attaque rapide que vous possédez."
+    },
+    {
+      "id": "code_du_bushido",
+      "nom": "Code du Bushido",
+      "categorie": "permanente",
+      "quantite": 2,
+      "effet": "Se place devant n'importe quel joueur (un seul Code du Bushido en jeu à la fois). À la fin de la phase de récupération du joueur qui l'a devant lui, retournez la carte du dessus de la pioche et défaussez-la. Si c'est une arme : défaussez 1 arme et passez le Code à votre voisin de gauche, ou perdez 1 point d'honneur et défaussez le Code. Sinon, passez le Code à votre voisin de gauche."
+    },
+    {
+      "id": "concentration",
+      "nom": "Concentration",
+      "categorie": "permanente",
+      "quantite": 6,
+      "effet": "Vous pouvez jouer 1 arme de plus par tour par carte Concentration que vous possédez."
+    },
+    {
+      "id": "ceremonie_du_the",
+      "nom": "Cérémonie du thé",
+      "categorie": "action",
+      "quantite": 4,
+      "effet": "Piochez 3 cartes. Tous les autres joueurs piochent 1 carte."
+    },
+    {
+      "id": "cri_de_guerre",
+      "nom": "Cri de guerre",
+      "categorie": "action",
+      "quantite": 4,
+      "effet": "Tous les autres joueurs doivent défausser 1 parade ou perdre 1 point de vie. Les joueurs à terre ne sont pas affectés."
+    },
+    {
+      "id": "daimyo",
+      "nom": "Daimyō",
+      "categorie": "action",
+      "quantite": 3,
+      "effet": "Piochez 2 cartes. Si vous la possédez en main à la fin de la partie, elle rapporte 1 point d'honneur (jamais doublé ni triplé, rien pour le ronin)."
+    },
+    {
+      "id": "diversion",
+      "nom": "Diversion",
+      "categorie": "action",
+      "quantite": 5,
+      "effet": "Piochez au hasard 1 carte dans la main d'un joueur de votre choix et ajoutez-la à votre main."
+    },
+    {
+      "id": "geisha",
+      "nom": "Geisha",
+      "categorie": "action",
+      "quantite": 6,
+      "effet": "Défaussez 1 carte permanente en jeu ou 1 carte au hasard dans la main d'un autre joueur de votre choix."
+    },
+    {
+      "id": "ju_jitsu",
+      "nom": "Ju Jitsu",
+      "categorie": "action",
+      "quantite": 3,
+      "effet": "Tous les autres joueurs doivent défausser 1 arme ou perdre 1 point de vie. Les joueurs à terre ne sont pas affectés."
+    },
+    {
+      "id": "meditation",
+      "nom": "Méditation",
+      "categorie": "action",
+      "quantite": 3,
+      "effet": "Récupérez tous vos points de vie. Un autre joueur de votre choix pioche 1 carte. Jouable même à pleine vie ; ne soigne jamais les autres joueurs."
+    },
+    {
+      "id": "parade",
+      "nom": "Parade",
+      "categorie": "action",
+      "quantite": 15,
+      "effet": "Annule une attaque d'arme qui vous prend pour cible. Jouable à tout moment, même en dehors de votre tour."
+    }
+  ]
+}

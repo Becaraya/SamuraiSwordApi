@@ -1,0 +1,77 @@
+{
+  "roles": [
+    {
+      "id": "shogun",
+      "nom": "Shogun",
+      "camp": "shogun_samourai",
+      "revele": true,
+      "multiplicateur_score": { "3": 2, "4": 2, "5": 1, "6": 1, "7": 1 }
+    },
+    {
+      "id": "samourai",
+      "nom": "Samouraï",
+      "camp": "shogun_samourai",
+      "multiplicateur_score": { "3": null, "4": 2, "5": 1, "6": 2, "7": 1 }
+    },
+    {
+      "id": "ninja_1",
+      "nom": "Ninja (1 shuriken)",
+      "camp": "ninja",
+      "etoiles": 1,
+      "multiplicateur_score": { "3": 1, "4": 1, "5": 1, "6": 1, "7": 1 }
+    },
+    {
+      "id": "ninja_2",
+      "nom": "Ninja (2 shurikens)",
+      "camp": "ninja",
+      "etoiles": 2,
+      "note": "À 4 joueurs : x2 si c'est le ninja avec le plus d'étoiles, sinon x1.",
+      "multiplicateur_score": { "3": 1, "4": "etoiles", "5": 1, "6": 1, "7": 1 }
+    },
+    {
+      "id": "ninja_3",
+      "nom": "Ninja (3 shurikens)",
+      "camp": "ninja",
+      "etoiles": 3,
+      "multiplicateur_score": { "3": 1, "4": 2, "5": 1, "6": 1, "7": 1 }
+    },
+    {
+      "id": "ronin",
+      "nom": "Ronin",
+      "camp": "ronin",
+      "multiplicateur_score": { "3": null, "4": null, "5": 2, "6": 3, "7": 3 }
+    }
+  ],
+  "preparation": {
+    "3": {
+      "note": "Un joueur tire le Shogun au hasard, les deux autres sont ninjas.",
+      "roles": { "shogun": 1, "ninja": 2 },
+      "honneur_shogun": 6,
+      "honneur_autres": 3,
+      "shogun_pioche_bonus": 1,
+      "shogun_armes_bonus": 1,
+      "victoire_fil_de_lepee": false
+    },
+    "4": {
+      "roles": { "shogun": 1, "samourai": 1, "ninja": 2 },
+      "honneur_shogun": 5,
+      "honneur_autres": 3
+    },
+    "5": {
+      "roles": { "shogun": 1, "samourai": 1, "ronin": 1, "ninja": 2 },
+      "honneur_shogun": 5,
+      "honneur_autres": 3
+    },
+    "6": {
+      "roles": { "shogun": 1, "samourai": 1, "ronin": 1, "ninja": 3 },
+      "honneur_shogun": 5,
+      "honneur_autres": 4
+    },
+    "7": {
+      "roles": { "shogun": 1, "samourai": 2, "ronin": 1, "ninja": 3 },
+      "honneur_shogun": 5,
+      "honneur_autres": 4
+    }
+  },
+  "main_depart_par_place": [4, 5, 5, 6, 6, 7, 7]
+}
