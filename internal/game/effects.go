@@ -30,7 +30,85 @@ type BushidoChoice struct {
 const codeBushido = "code_du_bushido"
 
 func (g *Game) busy() bool {
-	return g.Pending != nil || g.Collective != nil || g.Bushido != nil
+	return g.Pending != nil || g.Collective != nil || g.Bushido != nil || g.DrawChoice != nil
+}
+
+// DrawChoice est la décision d'Ieyasu en phase de pioche : carte de la défausse ou pioche normale.
+type DrawChoice struct {
+	Player string `json:"player"`
+	Top    Card   `json:"top"`
+	Count  int    `json:"count"`
+}
+
+// PowerInfo décrit un pouvoir de personnage à activer volontairement.
+type PowerInfo struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	OK     bool   `json:"ok"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// powerOf retourne le pouvoir activable du joueur (Nobunaga : sacrifier 1 PV, sauf le dernier, pour piocher).
+func (g *Game) powerOf(p *Player) *PowerInfo {
+	if p.characterID() != "nobunaga" || g.State != GameStateStarted {
+		return nil
+	}
+	info := &PowerInfo{ID: "nobunaga", Label: "Sacrifier 1 PV : piocher 1 carte"}
+	switch {
+	case g.busy():
+		info.Reason = "Une résolution est en cours."
+	case g.Active != p.Name || g.Phase != PhasePlay:
+		info.Reason = "Disponible pendant votre phase de jeu."
+	case p.Life <= 1:
+		info.Reason = "Vous ne pouvez pas sacrifier votre dernier PV."
+	default:
+		info.OK = true
+	}
+	return info
+}
+
+// UsePower active le pouvoir volontaire du personnage du joueur.
+func (g *Game) UsePower(name, power string) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	p := g.Players[name]
+	if g.State != GameStateStarted || p == nil {
+		return ErrNotStarted
+	}
+	info := g.powerOf(p)
+	if info == nil || info.ID != power {
+		return ErrNotPlayable
+	}
+	if !info.OK {
+		if g.busy() {
+			return ErrAttackPending
+		}
+		if g.Active != name {
+			return ErrNotYourTurn
+		}
+		if g.Phase != PhasePlay {
+			return ErrWrongPhase
+		}
+		return ErrNotPlayable
+	}
+
+	p.Life--
+	g.logf("action", "Nobunaga (%s) sacrifie 1 PV (%d/%d) et pioche 1 carte.", p.Name, p.Life, p.MaxLife)
+	g.drawCards(p, 1)
+	g.refresh()
+	return nil
+}
+
+func (g *Game) respondDraw(name string, takeDiscard bool) error {
+	if g.DrawChoice.Player != name {
+		return ErrNotTarget
+	}
+	p := g.Players[name]
+	n := g.DrawChoice.Count
+	g.DrawChoice = nil
+	g.finishDraw(p, n, takeDiscard)
+	return nil
 }
 
 func weaponIndices(p *Player) []int {

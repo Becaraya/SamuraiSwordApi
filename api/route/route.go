@@ -12,6 +12,7 @@ import (
 
 func Setup(env *bootstrap.Env, timeout time.Duration, gin *gin.Engine) {
 	middleware.SetDisconnectHandler(handler.HandleDisconnect)
+	middleware.SetConnectHandler(handler.HandleConnect)
 
 	publicRouter := gin.Group("")
 	{
@@ -23,6 +24,8 @@ func Setup(env *bootstrap.Env, timeout time.Duration, gin *gin.Engine) {
 	protectedRouter.Use(middleware.JWTAuthMiddleware(env.AccessTokenSecret))
 	{
 		protectedRouter.GET("/tokens", handler.ListTokens)
+		protectedRouter.GET("/catalog", handler.GetCatalog)
+		protectedRouter.POST("/game/chat", handler.PostChat)
 		protectedRouter.POST("/logout", handler.Logout)
 		protectedRouter.GET("/game", handler.GetGameState)
 		protectedRouter.GET("/game/me", handler.GetMyPrivateState)
@@ -36,6 +39,7 @@ func Setup(env *bootstrap.Env, timeout time.Duration, gin *gin.Engine) {
 		protectedRouter.GET("/game/targets", handler.GetTargets)
 		protectedRouter.POST("/game/play", handler.PlayWeapon)
 		protectedRouter.POST("/game/respond", handler.RespondToAttack)
+		protectedRouter.POST("/game/power", handler.UsePower)
 
 		// Routes de test, jamais exposées hors développement
 		if env.AppEnv == "development" {

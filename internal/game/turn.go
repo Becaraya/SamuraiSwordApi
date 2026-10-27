@@ -80,8 +80,28 @@ func (g *Game) drawPhase(p *Player) {
 	if len(g.Players) == 3 && p.Role != nil && p.Role.ID == RoleShogun {
 		n++
 	}
-	g.drawCards(p, n)
-	g.logf("info", "Tour %d : %s pioche %d cartes.", g.Turn, p.Name, n)
+
+	// Ieyasu peut remplacer sa première carte par celle du dessus de la défausse : décision du joueur.
+	if p.characterID() == "ieyasu" && len(g.Discard) > 0 && !isBotName(p.Name) && g.State == GameStateStarted {
+		g.DrawChoice = &DrawChoice{Player: p.Name, Top: g.Discard[len(g.Discard)-1], Count: n}
+		g.refresh()
+		return
+	}
+	g.finishDraw(p, n, false)
+}
+
+// finishDraw résout la pioche (verrou déjà pris) puis ouvre la phase de jeu.
+func (g *Game) finishDraw(p *Player, n int, takeDiscard bool) {
+	if takeDiscard && len(g.Discard) > 0 {
+		top := g.Discard[len(g.Discard)-1]
+		g.Discard = g.Discard[:len(g.Discard)-1]
+		p.Hand = append(p.Hand, top)
+		g.drawCards(p, n-1)
+		g.logf("info", "Tour %d : %s prend %s dans la défausse et pioche %d carte(s).", g.Turn, p.Name, top.Name, n-1)
+	} else {
+		g.drawCards(p, n)
+		g.logf("info", "Tour %d : %s pioche %d cartes.", g.Turn, p.Name, n)
+	}
 
 	if g.State == GameStateStarted {
 		g.Phase = PhasePlay

@@ -132,6 +132,22 @@ func loadData() {
 	handSizes = rawRoles.HandSizes
 }
 
+// CatalogCard est une carte du jeu avec sa quantité dans la pioche.
+type CatalogCard struct {
+	Card
+	Quantity int `json:"quantity"`
+}
+
+// Catalog retourne toutes les cartes et tous les personnages du jeu (données publiques).
+func Catalog() ([]CatalogCard, []Character) {
+	loadOnce.Do(loadData)
+	cards := make([]CatalogCard, 0, len(cardDefs))
+	for _, d := range cardDefs {
+		cards = append(cards, CatalogCard{Card: d.Card, Quantity: d.Quantity})
+	}
+	return cards, append([]Character(nil), characters...)
+}
+
 // startingHonor retourne l'honneur initial du Shogun et des autres joueurs.
 func startingHonor(playerCount int) (shogun, others int) {
 	loadOnce.Do(loadData)

@@ -49,8 +49,8 @@ func Login(env *bootstrap.Env) gin.HandlerFunc {
 func Logout(c *gin.Context) {
 	username := c.GetString("username")
 	tokenStore.RemoveToken(username)
-	if removePlayer(username) {
-		broadcastGameUpdate("player_left", username)
+	if event := removePlayer(username); event != "" {
+		broadcastGameUpdate(event, username)
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out"})
 }

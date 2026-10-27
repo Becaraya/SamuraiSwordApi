@@ -37,7 +37,8 @@ type Player struct {
 	HandCount  int        `json:"hand_count"`
 	Down       string     `json:"down"` // "", "hp" ou "hand" : joueur à terre (pas éliminé)
 	Ready      bool       `json:"ready"`
-	Hand       []Card     `json:"-"` // privée : exposée uniquement à son propriétaire
+	Away       bool       `json:"away"` // déconnecté en pleine partie : le serveur joue à sa place
+	Hand       []Card     `json:"-"`    // privée : exposée uniquement à son propriétaire
 }
 
 // Game représente l'état complet d'une partie
@@ -52,19 +53,25 @@ type Game struct {
 	Active      string         `json:"active"` // joueur dont c'est le tour
 	Phase       Phase          `json:"phase"`
 	Turn        int            `json:"turn"`
+	Round       int            `json:"round"`  // numéro de la partie dans ce lobby
 	Played      int            `json:"played"` // armes jouées ce tour
 	Pending     *Attack        `json:"pending"`
 	Collective  *Collective    `json:"collective"`
 	Bushido     *BushidoChoice `json:"bushido"`
+	DrawChoice  *DrawChoice    `json:"draw_choice"`
 	Results     *Results       `json:"results,omitempty"`
 	Log         []LogEntry     `json:"log"`
 	EndedReason string         `json:"ended_reason,omitempty"`
+	Chat        []ChatMessage  `json:"chat"`
 
 	Deck         []Card `json:"-"`
 	Discard      []Card `json:"-"`
 	DeckCount    int    `json:"deck_count"`
 	DiscardCount int    `json:"discard_count"`
 	DiscardTop   *Card  `json:"discard_top"`
+
+	lastDefeat *defeat // dernière défaite en cours de traitement (pour Lame perdue et victoire au fil de l'épée)
+	sword      string  // joueur vainqueur au fil de l'épée
 
 	mu sync.RWMutex
 }
@@ -132,6 +139,13 @@ func (g *Game) RemovePlayer(playerName string) bool {
 	return false
 }
 
+// Status retourne l'état de la partie (lecture protégée par le verrou).
+func (g *Game) Status() GameState {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.State
+}
+
 // GetPlayers retourne la liste des joueurs
 func (g *Game) GetPlayers() map[string]*Player {
 	g.mu.RLock()
@@ -189,6 +203,7 @@ func (g *Game) EndGame() bool {
 	g.Active = ""
 	g.Phase = ""
 	g.Turn = 0
+	g.DrawChoice = nil
 	g.Played = 0
 	g.Pending = nil
 	g.Collective = nil
@@ -196,6 +211,8 @@ func (g *Game) EndGame() bool {
 	g.Log = nil
 	g.EndedReason = ""
 	g.Results = nil
+	g.Chat = nil
+	g.lastDefeat, g.sword = nil, ""
 	g.syncPiles()
 	for _, player := range g.Players {
 		defaults := NewPlayer(player.Name, player.Position)
@@ -205,6 +222,7 @@ func (g *Game) EndGame() bool {
 		player.Hand = nil
 		player.HandCount = 0
 		player.Down = ""
+		player.Away = false
 		player.Ready = strings.HasPrefix(player.Name, BotPrefix)
 		player.Permanents = defaults.Permanents
 		player.Life = defaults.Life
@@ -252,6 +270,8 @@ func (g *Game) deal() {
 	}
 
 	g.Turn = 1
+	g.Round++
+	g.DrawChoice = nil
 	g.Log = nil
 	g.Pending = nil
 	g.Collective = nil
@@ -269,29 +289,6 @@ func (g *Game) syncPiles() {
 		top := g.Discard[n-1]
 		g.DiscardTop = &top
 	}
-}
-
-// HandOf retourne une copie de la main d'un joueur.
-func (g *Game) HandOf(playerName string) []Card {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	hand := []Card{}
-	if player, ok := g.Players[playerName]; ok {
-		hand = append(hand, player.Hand...)
-	}
-	return hand
-}
-
-// RoleOf retourne le rôle secret d'un joueur (nil si inconnu ou partie non lancée).
-func (g *Game) RoleOf(playerName string) *Role {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	if player, ok := g.Players[playerName]; ok {
-		return player.Role
-	}
-	return nil
 }
 
 // getNextPosition trouve la prochaine position disponible

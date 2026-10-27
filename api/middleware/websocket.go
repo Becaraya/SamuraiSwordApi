@@ -5,9 +5,15 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+)
+
+const (
+	pingInterval = 20 * time.Second
+	readTimeout  = 50 * time.Second // une connexion morte (réseau coupé) est détectée sans attendre le TCP
 )
 
 var (
@@ -27,6 +33,7 @@ var (
 	jwtSecret string
 
 	onDisconnect func(username string)
+	onConnect    func(username string)
 )
 
 func SetJWTSecret(secret string) {
@@ -36,6 +43,11 @@ func SetJWTSecret(secret string) {
 // SetDisconnectHandler définit le callback appelé quand un utilisateur perd sa dernière connexion.
 func SetDisconnectHandler(handler func(username string)) {
 	onDisconnect = handler
+}
+
+// SetConnectHandler définit le callback appelé quand un utilisateur s'authentifie sur le WebSocket.
+func SetConnectHandler(handler func(username string)) {
+	onConnect = handler
 }
 
 func IsUserConnected(username string) bool {
@@ -66,6 +78,27 @@ func WebSocketHandler(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
+
+	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(readTimeout))
+	})
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			}
+		}
+	}()
 
 	connectionsMutex.Lock()
 	connections[conn] = ""
@@ -109,6 +142,7 @@ func WebSocketHandler(c *gin.Context) {
 		}
 
 		handleWebSocketMessage(conn, message)
+		_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
 	}
 }
 
@@ -142,6 +176,9 @@ func handleWebSocketMessage(conn *websocket.Conn, message WSMessage) {
 		connectedUsersMutex.Unlock()
 
 		broadcastPresence()
+		if onConnect != nil {
+			onConnect(username)
+		}
 	}
 }
 

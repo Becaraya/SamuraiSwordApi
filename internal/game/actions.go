@@ -33,11 +33,12 @@ func (g *Game) logf(kind, format string, args ...any) {
 
 // PrivateState regroupe ce que seul le joueur concerné peut voir.
 type PrivateState struct {
-	Hand          []Card `json:"hand"`
-	Role          *Role  `json:"role"`
-	Plays         []Play `json:"plays"`
-	ResponseCards []int  `json:"response_cards"` // cartes utilisables pour la réponse qu'on attend de moi
-	WeaponLimit   *Calc  `json:"weapon_limit"`
+	Hand          []Card     `json:"hand"`
+	Role          *Role      `json:"role"`
+	Plays         []Play     `json:"plays"`
+	ResponseCards []int      `json:"response_cards"` // cartes utilisables pour la réponse qu'on attend de moi
+	WeaponLimit   *Calc      `json:"weapon_limit"`
+	Power         *PowerInfo `json:"power"`
 }
 
 func (g *Game) PrivateState(name string) PrivateState {
@@ -70,6 +71,7 @@ func (g *Game) PrivateState(name string) PrivateState {
 	}
 	limit := g.weaponLimit(p)
 	state.WeaponLimit = &limit
+	state.Power = g.powerOf(p)
 	return state
 }
 
@@ -106,6 +108,11 @@ func (g *Game) declareAttack(att *Player, idx int, t Target) {
 
 // PlayCard joue la carte à l'indice donné ; `target` et `option` précisent la cible et le choix éventuel.
 func (g *Game) PlayCard(name string, cardIndex int, targetName, option string) error {
+	return g.PlayCardExpect(name, cardIndex, "", targetName, option)
+}
+
+// PlayCardExpect comme PlayCard, mais refuse si la carte à cet indice n'est plus `wantID` (requête périmée ou doublon).
+func (g *Game) PlayCardExpect(name string, cardIndex int, wantID, targetName, option string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -113,7 +120,7 @@ func (g *Game) PlayCard(name string, cardIndex int, targetName, option string) e
 		return ErrNotStarted
 	}
 	p := g.Players[name]
-	if p == nil || cardIndex < 0 || cardIndex >= len(p.Hand) {
+	if p == nil || cardIndex < 0 || cardIndex >= len(p.Hand) || (wantID != "" && p.Hand[cardIndex].ID != wantID) {
 		return ErrCardNotFound
 	}
 	if g.busy() {
@@ -156,13 +163,23 @@ func (g *Game) PlayCard(name string, cardIndex int, targetName, option string) e
 // Respond permet de répondre à ce qu'on attend de soi : attaque, Cri de guerre / Ju Jitsu ou Code du Bushido.
 // `useCard` désigne la carte à défausser (parade, arme...), sinon on subit la conséquence.
 func (g *Game) Respond(name string, useCard bool, cardIndex int) error {
+	return g.RespondExpect(name, useCard, cardIndex, "")
+}
+
+// RespondExpect comme Respond, mais refuse si la carte défaussée n'est plus `wantID`.
+func (g *Game) RespondExpect(name string, useCard bool, cardIndex int, wantID string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if p := g.Players[name]; wantID != "" && useCard && p != nil && (cardIndex < 0 || cardIndex >= len(p.Hand) || p.Hand[cardIndex].ID != wantID) {
+		return ErrCardNotFound
+	}
 	return g.respond(name, useCard, cardIndex)
 }
 
 func (g *Game) respond(name string, useCard bool, cardIndex int) error {
 	switch {
+	case g.DrawChoice != nil:
+		return g.respondDraw(name, useCard)
 	case g.Collective != nil:
 		return g.respondCollective(name, useCard, cardIndex)
 	case g.Bushido != nil:
@@ -196,6 +213,9 @@ func (g *Game) respond(name string, useCard bool, cardIndex int) error {
 
 // hurt retire des PV à un joueur ; à 0 PV il perd 1 point d'honneur au profit de `att`.
 func (g *Game) hurt(att, tgt *Player, amount int) int {
+	if g.State != GameStateStarted {
+		return 0
+	}
 	lost := amount
 	if lost > tgt.Life {
 		lost = tgt.Life
@@ -207,8 +227,9 @@ func (g *Game) hurt(att, tgt *Player, amount int) int {
 		tgt.Honor--
 		att.Honor++
 		g.logf("important", "%s est vaincu·e : perd 1 point d'honneur, %s en gagne 1.", tgt.Name, att.Name)
-		g.checkHonor()
-		g.checkLastStanding()
+		g.lastDefeat = &defeat{Victim: tgt, Killer: att}
+		g.checkEnd()
+		g.lastDefeat = nil
 	}
 	return lost
 }
@@ -241,7 +262,7 @@ func (g *Game) resolveAttack() {
 	}
 }
 
-// NeedsBotStep indique si un bot doit agir (tour de bot ou réponse d'un bot).
+// NeedsBotStep indique si un joueur automatique (bot ou joueur déconnecté) doit agir.
 func (g *Game) NeedsBotStep() bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -250,22 +271,64 @@ func (g *Game) NeedsBotStep() bool {
 		return false
 	}
 	switch {
+	case g.DrawChoice != nil:
+		return g.automated(g.DrawChoice.Player)
 	case g.Pending != nil:
-		return isBotName(g.Pending.Target)
+		return g.automated(g.Pending.Target)
 	case g.Collective != nil:
 		for _, r := range g.Collective.Rows {
-			if r.Status == "pending" && isBotName(r.Name) {
+			if r.Status == "pending" && g.automated(r.Name) {
 				return true
 			}
 		}
 		return false
 	case g.Bushido != nil:
-		return isBotName(g.Bushido.Player)
+		return g.automated(g.Bushido.Player)
 	}
-	return isBotName(g.Active)
+	return g.automated(g.Active)
 }
 
 func isBotName(name string) bool { return strings.HasPrefix(name, BotPrefix) }
+
+// automated indique si le serveur joue pour ce joueur : bot, ou humain absent.
+func (g *Game) automated(name string) bool {
+	p := g.Players[name]
+	return p != nil && (isBotName(name) || p.Away)
+}
+
+// SetAway (dé)marque l'automatisation d'un joueur déconnecté ; retourne true si l'état a changé.
+func (g *Game) SetAway(name string, away bool) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	p := g.Players[name]
+	if p == nil || isBotName(name) || p.Away == away || g.State == GameStateWaiting {
+		return false
+	}
+	p.Away = away
+	if away {
+		g.logf("important", "%s est déconnecté·e : le serveur répond et passe son tour à sa place.", name)
+	} else {
+		g.logf("important", "%s est de retour et reprend la main.", name)
+	}
+	return true
+}
+
+// AllHumansAway indique qu'aucun joueur humain n'est présent dans une partie commencée ou terminée.
+func (g *Game) AllHumansAway() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if g.State == GameStateWaiting {
+		return false
+	}
+	for name, p := range g.Players {
+		if !isBotName(name) && !p.Away {
+			return false
+		}
+	}
+	return true
+}
 
 // PlayBotStep fait agir un bot : réponse, attaque d'un joueur, ou fin de tour. Retourne l'acteur.
 func (g *Game) PlayBotStep() (string, bool) {
@@ -277,9 +340,17 @@ func (g *Game) PlayBotStep() (string, bool) {
 	}
 
 	switch {
+	case g.DrawChoice != nil:
+		name := g.DrawChoice.Player
+		if !g.automated(name) {
+			return "", false
+		}
+		_ = g.respondDraw(name, false)
+		g.refresh()
+		return name, true
 	case g.Pending != nil:
 		bot := g.Players[g.Pending.Target]
-		if !isBotName(bot.Name) {
+		if !g.automated(bot.Name) {
 			return "", false
 		}
 		options := g.parryOptions(bot)
@@ -287,7 +358,7 @@ func (g *Game) PlayBotStep() (string, bool) {
 		return bot.Name, true
 	case g.Collective != nil:
 		for _, r := range g.Collective.Rows {
-			if r.Status == "pending" && isBotName(r.Name) {
+			if r.Status == "pending" && g.automated(r.Name) {
 				g.botRespond(r.Name, g.collectiveOptions(g.Collective.Card, g.Players[r.Name]))
 				return r.Name, true
 			}
@@ -295,20 +366,20 @@ func (g *Game) PlayBotStep() (string, bool) {
 		return "", false
 	case g.Bushido != nil:
 		bot := g.Players[g.Bushido.Player]
-		if !isBotName(bot.Name) {
+		if !g.automated(bot.Name) {
 			return "", false
 		}
 		g.botRespond(bot.Name, weaponIndices(bot))
 		return bot.Name, true
 	}
 
-	if !isBotName(g.Active) {
+	if !g.automated(g.Active) {
 		return "", false
 	}
 	bot := g.Players[g.Active]
 
-	// Un bot attaque une fois par tour : la première arme jouable sur la première cible valide (joueurs réels d'abord).
-	if g.Phase == PhasePlay && g.Played == 0 {
+	// Un bot attaque une fois par tour (un joueur absent ne fait que passer) : première arme jouable sur la première cible valide, joueurs réels d'abord.
+	if isBotName(bot.Name) && g.Phase == PhasePlay && g.Played == 0 {
 		for i, c := range bot.Hand {
 			if c.Category != "arme" || !g.playability(bot, c).OK {
 				continue

@@ -10,8 +10,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// disconnectGracePeriod laisse le temps à un joueur de recharger la page sans perdre sa place.
+// disconnectGracePeriod laisse le temps à un joueur de recharger la page sans perdre sa place au lobby.
 const disconnectGracePeriod = 15 * time.Second
+
+// awayDelay et abandonDelay : en partie, délai avant la prise en main par le serveur, puis avant l'abandon si plus aucun humain.
+const (
+	awayDelay    = 30 * time.Second
+	abandonDelay = 2 * time.Minute
+)
 
 // botTurnDelay laisse voir le tour d'un bot (mode debug) avant qu'il ne passe la main.
 const botTurnDelay = 1500 * time.Millisecond
@@ -55,31 +61,66 @@ func broadcastGameUpdate(event, username string) {
 	middleware.BroadcastToAll(middleware.WSMessage{Type: "game_update", Data: data, From: username})
 }
 
-// removePlayer retire un joueur de la partie courante et réinitialise le lobby s'il est vide.
-func removePlayer(username string) bool {
+// removePlayer retire un joueur du lobby (réinitialisé s'il est vide) ou, en pleine partie, le passe en mode automatique.
+// Retourne l'événement à diffuser, ou "" s'il n'y a rien à signaler.
+func removePlayer(username string) string {
 	gameManager := game.GetGameManager()
 	currentGame := gameManager.GetCurrentGame()
-	if currentGame == nil || !currentGame.RemovePlayer(username) {
-		return false
+	if currentGame == nil {
+		return ""
+	}
+	if currentGame.Status() != game.GameStateWaiting {
+		if !currentGame.SetAway(username, true) {
+			return ""
+		}
+		scheduleBotTurns()
+		scheduleAbandon(currentGame)
+		return "player_away"
+	}
+	if !currentGame.RemovePlayer(username) {
+		return ""
 	}
 	gameManager.ResetIfEmpty()
-	return true
+	return "player_left"
 }
 
-// HandleDisconnect retire un joueur du lobby s'il ne se reconnecte pas rapidement.
+// scheduleAbandon supprime une partie commencée dont tous les humains sont partis.
+func scheduleAbandon(g *game.Game) {
+	if !g.AllHumansAway() {
+		return
+	}
+	time.AfterFunc(abandonDelay, func() {
+		gm := game.GetGameManager()
+		if gm.GetCurrentGame() != g || !g.AllHumansAway() {
+			return
+		}
+		gm.DeleteCurrentGame()
+		broadcastGameUpdate("game_abandoned", "")
+	})
+}
+
+// HandleDisconnect traite une déconnexion : au lobby le joueur perd sa place après un délai de grâce,
+// en partie il est joué automatiquement après awayDelay (il garde sa place).
 func HandleDisconnect(username string) {
-	time.AfterFunc(disconnectGracePeriod, func() {
+	delay := disconnectGracePeriod
+	if cg := game.GetGameManager().GetCurrentGame(); cg != nil && cg.Status() != game.GameStateWaiting {
+		delay = awayDelay
+	}
+	time.AfterFunc(delay, func() {
 		if middleware.IsUserConnected(username) {
 			return
 		}
-		currentGame := game.GetGameManager().GetCurrentGame()
-		if currentGame == nil || currentGame.State != game.GameStateWaiting {
-			return
-		}
-		if removePlayer(username) {
-			broadcastGameUpdate("player_left", username)
+		if event := removePlayer(username); event != "" {
+			broadcastGameUpdate(event, username)
 		}
 	})
+}
+
+// HandleConnect rend la main à un joueur qui se reconnecte en pleine partie.
+func HandleConnect(username string) {
+	if cg := game.GetGameManager().GetCurrentGame(); cg != nil && cg.SetAway(username, false) {
+		broadcastGameUpdate("player_back", username)
+	}
 }
 
 func JoinGame(c *gin.Context) {
@@ -115,12 +156,12 @@ func JoinGame(c *gin.Context) {
 func LeaveGame(c *gin.Context) {
 	username := c.GetString("username")
 
-	if !removePlayer(username) {
+	event := removePlayer(username)
+	if event == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Player not in game"})
 		return
 	}
-
-	broadcastGameUpdate("player_left", username)
+	broadcastGameUpdate(event, username)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully left game"})
 }
@@ -291,6 +332,7 @@ func PlayWeapon(c *gin.Context) {
 	username := c.GetString("username")
 	var body struct {
 		Card   int    `json:"card"`
+		CardID string `json:"card_id"`
 		Target string `json:"target"`
 		Option string `json:"option"`
 	}
@@ -299,7 +341,7 @@ func PlayWeapon(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-	if err := currentGame.PlayCard(username, body.Card, body.Target, body.Option); err != nil {
+	if err := currentGame.PlayCardExpect(username, body.Card, body.CardID, body.Target, body.Option); err != nil {
 		turnError(c, err)
 		return
 	}
@@ -309,19 +351,70 @@ func PlayWeapon(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Card played", "game": currentGame})
 }
 
-// RespondToAttack permet à la cible de parer (carte `card`) ou de subir l'attaque
-func RespondToAttack(c *gin.Context) {
-	username := c.GetString("username")
+// GetCatalog retourne toutes les cartes et tous les personnages (données publiques).
+func GetCatalog(c *gin.Context) {
+	cards, characters := game.Catalog()
+	c.JSON(http.StatusOK, gin.H{"cards": cards, "characters": characters})
+}
+
+// PostChat publie un message dans le chat de la table.
+func PostChat(c *gin.Context) {
 	var body struct {
-		Parry bool `json:"parry"`
-		Card  int  `json:"card"`
+		Text string `json:"text"`
 	}
 	currentGame := game.GetGameManager().GetCurrentGame()
 	if err := c.ShouldBindJSON(&body); err != nil || currentGame == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-	if err := currentGame.Respond(username, body.Parry, body.Card); err != nil {
+	username := c.GetString("username")
+	switch err := currentGame.PostChat(username, body.Text); err {
+	case nil:
+		broadcastGameUpdate("chat", username)
+		c.JSON(http.StatusOK, gin.H{"message": "Sent"})
+	case game.ErrChatRate:
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": err.Error(), "code": "CHAT_RATE"})
+	case game.ErrNotInGame:
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error(), "code": "NOT_IN_GAME"})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": "CHAT_INVALID"})
+	}
+}
+
+// UsePower active le pouvoir volontaire du personnage du joueur courant
+func UsePower(c *gin.Context) {
+	username := c.GetString("username")
+	var body struct {
+		Power string `json:"power"`
+	}
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if err := c.ShouldBindJSON(&body); err != nil || currentGame == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	if err := currentGame.UsePower(username, body.Power); err != nil {
+		turnError(c, err)
+		return
+	}
+
+	broadcastGameUpdate("power", username)
+	c.JSON(http.StatusOK, gin.H{"message": "Power used", "game": currentGame})
+}
+
+// RespondToAttack permet à la cible de parer (carte `card`) ou de subir l'attaque
+func RespondToAttack(c *gin.Context) {
+	username := c.GetString("username")
+	var body struct {
+		Parry  bool   `json:"parry"`
+		Card   int    `json:"card"`
+		CardID string `json:"card_id"`
+	}
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if err := c.ShouldBindJSON(&body); err != nil || currentGame == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	if err := currentGame.RespondExpect(username, body.Parry, body.Card, body.CardID); err != nil {
 		turnError(c, err)
 		return
 	}

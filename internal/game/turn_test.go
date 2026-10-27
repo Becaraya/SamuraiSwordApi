@@ -74,6 +74,11 @@ func TestTurnFlowWithMandatoryDiscard(t *testing.T) {
 	if err := g.DiscardCards(first, []int{0, 1}); err != nil {
 		t.Fatal(err)
 	}
+	if g.DrawChoice != nil { // le joueur suivant peut être Ieyasu
+		if err := g.Respond(g.DrawChoice.Player, false, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if g.Active == first || g.Turn != 2 || g.Phase != PhasePlay {
 		t.Fatalf("turn should have passed on: active=%s turn=%d phase=%s", g.Active, g.Turn, g.Phase)
 	}

@@ -6,6 +6,15 @@ import (
 	"strconv"
 )
 
+// Pénalité de Lame perdue (points d'honneur retirés au total du camp de la victime).
+const lostBladePenalty = 3
+
+// Types de victoire.
+const (
+	VictoryHonor = "honneur" // décompte des points d'honneur
+	VictorySword = "epee"    // victoire au fil de l'épée
+)
+
 // ScoreRow détaille le score d'un joueur en fin de partie.
 type ScoreRow struct {
 	Name      string `json:"name"`
@@ -18,18 +27,40 @@ type ScoreRow struct {
 	Score     int    `json:"score"`
 }
 
-// CampScore est le total d'un camp (shogun_samourai, ninja ou ronin).
+// CampScore est le total d'un camp (shogun_samourai, ninja ou ronin), pénalité de Lame perdue incluse.
 type CampScore struct {
-	Camp  string `json:"camp"`
-	Total int    `json:"total"`
+	Camp    string `json:"camp"`
+	Total   int    `json:"total"`
+	Penalty int    `json:"penalty,omitempty"`
 }
 
-// Results explique le calcul des scores : honneur de base, multiplicateur du rôle, bonus Daimyō.
+// Results explique le calcul des scores : honneur de base, multiplicateur du rôle, bonus Daimyō, pénalités.
 type Results struct {
-	Reason string      `json:"reason"`
-	Rows   []ScoreRow  `json:"rows"`
-	Camps  []CampScore `json:"camps"`
-	Tie    bool        `json:"tie"` // le départage n'est pas défini dans la spécification
+	Reason  string      `json:"reason"`
+	Rows    []ScoreRow  `json:"rows"`
+	Camps   []CampScore `json:"camps"` // triés : égalité départagée Ninja > Shogun/Samouraï > Ronin
+	Winner  string      `json:"winner"`
+	Victory string      `json:"victory"`        // VictoryHonor ou VictorySword
+	Tie     bool        `json:"tie"`            // égalité de points en tête, résolue par la règle de départage
+	Note    string      `json:"note,omitempty"` // explication d'un départage ou d'une pénalité
+}
+
+// defeat décrit une défaite en cours de traitement.
+type defeat struct{ Victim, Killer *Player }
+
+func sameTeam(a, b *Player) bool {
+	return a != nil && b != nil && a.Role != nil && b.Role != nil && a.Role.Camp == b.Role.Camp
+}
+
+// campRank donne la priorité de départage : Ninja > Shogun/Samouraï > Ronin.
+func campRank(camp string) int {
+	switch camp {
+	case "ninja":
+		return 0
+	case "shogun_samourai":
+		return 1
+	}
+	return 2
 }
 
 // multiplierFor retourne le multiplicateur du rôle pour ce nombre de joueurs.
@@ -47,6 +78,17 @@ func multiplierFor(role Role, playerCount int, maxNinjaStars int) (int, string) 
 	return 1, ""
 }
 
+// campLabel est le nom d'un camp dans les messages.
+func campLabel(camp string) string {
+	switch camp {
+	case "ninja":
+		return "les Ninjas"
+	case "ronin":
+		return "le Ronin"
+	}
+	return "le Shogun et les Samouraïs"
+}
+
 // computeResults calcule le décompte final (verrou déjà pris).
 func (g *Game) computeResults(reason string) {
 	players := g.sortedPlayers()
@@ -57,7 +99,7 @@ func (g *Game) computeResults(reason string) {
 		}
 	}
 
-	res := &Results{Reason: reason}
+	res := &Results{Reason: reason, Victory: VictoryHonor}
 	camps := map[string]int{}
 	for _, p := range players {
 		if p.Role == nil || p.Character == nil {
@@ -72,31 +114,79 @@ func (g *Game) computeResults(reason string) {
 		res.Rows = append(res.Rows, row)
 		camps[p.Role.Camp] += row.Score
 	}
+
+	// Lame perdue : la partie se termine parce qu'un joueur a été vaincu par un coéquipier.
+	penalty := map[string]int{}
+	if d := g.lastDefeat; d != nil && sameTeam(d.Victim, d.Killer) {
+		camp := d.Victim.Role.Camp
+		camps[camp] -= lostBladePenalty
+		penalty[camp] = lostBladePenalty
+		res.Note = fmt.Sprintf("Lame perdue : %s a été vaincu·e par un coéquipier, son camp perd %d points d'honneur.", d.Victim.Name, lostBladePenalty)
+	}
+
 	for camp, total := range camps {
-		res.Camps = append(res.Camps, CampScore{Camp: camp, Total: total})
+		res.Camps = append(res.Camps, CampScore{Camp: camp, Total: total, Penalty: penalty[camp]})
 	}
 	sort.Slice(res.Camps, func(i, j int) bool {
 		if res.Camps[i].Total != res.Camps[j].Total {
 			return res.Camps[i].Total > res.Camps[j].Total
 		}
-		return res.Camps[i].Camp < res.Camps[j].Camp
+		return campRank(res.Camps[i].Camp) < campRank(res.Camps[j].Camp)
 	})
-	res.Tie = len(res.Camps) > 1 && res.Camps[0].Total == res.Camps[1].Total
+	if len(res.Camps) > 0 {
+		res.Winner = res.Camps[0].Camp
+	}
+	if len(res.Camps) > 1 && res.Camps[0].Total == res.Camps[1].Total {
+		res.Tie = true
+		tie := fmt.Sprintf("Égalité à %d points : %s l'emporte (départage Ninjas, puis Shogun et Samouraïs, puis Ronin).", res.Camps[0].Total, campLabel(res.Winner))
+		if res.Note != "" {
+			res.Note += " "
+		}
+		res.Note += tie
+	}
+
+	// Victoire au fil de l'épée : le camp du dernier joueur debout gagne, quels que soient les points.
+	if g.sword != "" {
+		if p := g.Players[g.sword]; p != nil && p.Role != nil {
+			res.Victory = VictorySword
+			res.Winner = p.Role.Camp
+			res.Tie = false
+			res.Note = fmt.Sprintf("Victoire au fil de l'épée : %s est le seul joueur à avoir encore des points de vie.", p.Name)
+		}
+	}
 	g.Results = res
 }
 
-// checkLastStanding termine la partie quand un seul joueur a encore des PV.
-func (g *Game) checkLastStanding() {
+// standing retourne les joueurs qui ont encore au moins 1 PV.
+func (g *Game) standing() []*Player {
+	var out []*Player
+	for _, p := range g.sortedPlayers() {
+		if p.Life > 0 {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// checkEnd applique les conditions de fin de partie après une défaite (verrou déjà pris) :
+//  1. victoire au fil de l'épée (4 joueurs ou plus) si un seul joueur a encore des PV,
+//     sauf si la défaite vient d'un coéquipier : la partie se termine alors, mais aux points ;
+//  2. un joueur n'a plus de point d'honneur.
+func (g *Game) checkEnd() {
 	if g.State != GameStateStarted {
 		return
 	}
-	var standing []*Player
-	for _, p := range g.sortedPlayers() {
-		if p.Life > 0 {
-			standing = append(standing, p)
-		}
-	}
-	if len(standing) == 1 {
+	standing := g.standing()
+	teamKill := g.lastDefeat != nil && sameTeam(g.lastDefeat.Victim, g.lastDefeat.Killer)
+	sword := len(g.Players) > 3 && len(standing) == 1
+
+	if sword && !teamKill {
+		g.sword = standing[0].Name
 		g.finish(fmt.Sprintf("%s est le dernier joueur debout.", standing[0].Name))
+		return
+	}
+	g.checkHonor()
+	if g.State == GameStateStarted && sword {
+		g.finish(fmt.Sprintf("%s est le dernier joueur debout, mais la défaite vient d'un coéquipier.", standing[0].Name))
 	}
 }
