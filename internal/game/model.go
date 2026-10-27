@@ -23,11 +23,16 @@ const BotPrefix = "Bot-"
 
 // Player représente un joueur dans le jeu
 type Player struct {
-	Name     string    `json:"name"`
-	Position int       `json:"position"`
-	Life     int       `json:"life"`
-	Honor    int       `json:"honor"`
-	JoinedAt time.Time `json:"joined_at"`
+	Name       string     `json:"name"`
+	Position   int        `json:"position"`
+	Life       int        `json:"life"`
+	MaxLife    int        `json:"max_life"`
+	Honor      int        `json:"honor"`
+	JoinedAt   time.Time  `json:"joined_at"`
+	Character  *Character `json:"character"`
+	Permanents []Card     `json:"permanents"`
+	HandCount  int        `json:"hand_count"`
+	Hand       []Card     `json:"-"` // privée : exposée uniquement à son propriétaire
 }
 
 // Game représente l'état complet d'une partie
@@ -38,7 +43,14 @@ type Game struct {
 	CreatedBy  string             `json:"created_by"`
 	CreatedAt  time.Time          `json:"created_at"`
 	MaxPlayers int                `json:"max_players"`
-	mu         sync.RWMutex
+
+	Deck         []Card `json:"-"`
+	Discard      []Card `json:"-"`
+	DeckCount    int    `json:"deck_count"`
+	DiscardCount int    `json:"discard_count"`
+	DiscardTop   *Card  `json:"discard_top"`
+
+	mu sync.RWMutex
 }
 
 // NewGame crée une nouvelle partie
@@ -58,9 +70,11 @@ func NewPlayer(name string, position int) *Player {
 	return &Player{
 		Name:     name,
 		Position: position,
-		Life:     4, // Valeur par défaut
-		Honor:    4, // Valeur par défaut
-		JoinedAt: time.Now(),
+		Life:       4, // Valeur par défaut
+		MaxLife:    4,
+		Honor:      4, // Valeur par défaut
+		JoinedAt:   time.Now(),
+		Permanents: []Card{},
 	}
 }
 
@@ -138,9 +152,80 @@ func (g *Game) StartGame() bool {
 
 	if g.State == GameStateWaiting && len(g.Players) >= MinPlayers {
 		g.State = GameStateStarted
+		g.deal()
 		return true
 	}
 	return false
+}
+
+// EndGame termine la partie lancée et ramène les joueurs au lobby
+func (g *Game) EndGame() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.State != GameStateStarted {
+		return false
+	}
+
+	g.State = GameStateWaiting
+	g.Deck = nil
+	g.Discard = nil
+	g.syncPiles()
+	for _, player := range g.Players {
+		defaults := NewPlayer(player.Name, player.Position)
+		player.Character = nil
+		player.Hand = nil
+		player.HandCount = 0
+		player.Permanents = defaults.Permanents
+		player.Life = defaults.Life
+		player.MaxLife = defaults.MaxLife
+	}
+	return true
+}
+
+// deal attribue un personnage et une main de départ à chaque joueur (verrou déjà pris).
+func (g *Game) deal() {
+	g.Deck = buildDeck()
+	g.Discard = nil
+
+	chars := shuffledCharacters()
+	i := 0
+	for _, player := range g.Players {
+		character := chars[i%len(chars)]
+		i++
+		player.Character = &character
+		player.Life = character.Life
+		player.MaxLife = character.Life
+		player.Permanents = []Card{}
+		player.Hand = append([]Card(nil), g.Deck[:StartingHandSize]...)
+		player.HandCount = len(player.Hand)
+		g.Deck = g.Deck[StartingHandSize:]
+	}
+
+	g.syncPiles()
+}
+
+// syncPiles met à jour les compteurs publics de la pioche et de la défausse.
+func (g *Game) syncPiles() {
+	g.DeckCount = len(g.Deck)
+	g.DiscardCount = len(g.Discard)
+	g.DiscardTop = nil
+	if n := len(g.Discard); n > 0 {
+		top := g.Discard[n-1]
+		g.DiscardTop = &top
+	}
+}
+
+// HandOf retourne une copie de la main d'un joueur.
+func (g *Game) HandOf(playerName string) []Card {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	hand := []Card{}
+	if player, ok := g.Players[playerName]; ok {
+		hand = append(hand, player.Hand...)
+	}
+	return hand
 }
 
 // getNextPosition trouve la prochaine position disponible

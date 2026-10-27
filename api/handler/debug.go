@@ -35,6 +35,19 @@ func DebugCreateGame(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Debug game created", "game": g, "players": g.GetPlayers()})
 }
 
+// DebugAddBot ajoute un bot à la partie courante tant qu'elle n'est pas lancée ni pleine.
+func DebugAddBot(c *gin.Context) {
+	bot, ok := game.GetGameManager().AddDebugBot()
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot add bot (no lobby, full or already started)"})
+		return
+	}
+
+	broadcastGameUpdate("player_joined", bot.Name)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Bot added", "player": bot})
+}
+
 // DebugDeleteGame supprime la partie courante (bots inclus).
 func DebugDeleteGame(c *gin.Context) {
 	game.GetGameManager().DeleteCurrentGame()

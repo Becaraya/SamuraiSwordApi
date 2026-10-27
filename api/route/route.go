@@ -25,14 +25,17 @@ func Setup(env *bootstrap.Env, timeout time.Duration, gin *gin.Engine) {
 		protectedRouter.GET("/tokens", handler.ListTokens)
 		protectedRouter.POST("/logout", handler.Logout)
 		protectedRouter.GET("/game", handler.GetGameState)
+		protectedRouter.GET("/game/hand", handler.GetMyHand)
 		protectedRouter.POST("/game/join", handler.JoinGame)
 		protectedRouter.POST("/game/leave", handler.LeaveGame)
 		protectedRouter.POST("/game/start", handler.StartGame)
+		protectedRouter.POST("/game/end", handler.EndGame)
 
 		// Routes de test, jamais exposées hors développement
 		if env.AppEnv == "development" {
 			protectedRouter.POST("/debug/game", handler.DebugCreateGame)
 			protectedRouter.DELETE("/debug/game", handler.DebugDeleteGame)
+			protectedRouter.POST("/debug/bot", handler.DebugAddBot)
 		}
 	}
 }

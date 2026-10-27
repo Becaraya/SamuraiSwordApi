@@ -112,6 +112,43 @@ func GetGameState(c *gin.Context) {
 	c.JSON(http.StatusOK, gameSnapshot())
 }
 
+// EndGame termine la partie lancée (réservé à l'hôte) et ramène les joueurs au lobby
+func EndGame(c *gin.Context) {
+	username := c.GetString("username")
+	currentGame := game.GetGameManager().GetCurrentGame()
+
+	if currentGame == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No active game"})
+		return
+	}
+	if _, inGame := currentGame.GetPlayers()[username]; !inGame {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not in this game"})
+		return
+	}
+	if currentGame.Host() != username {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Only the host can end the game", "code": "NOT_HOST"})
+		return
+	}
+	if !currentGame.EndGame() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Game is not started"})
+		return
+	}
+
+	broadcastGameUpdate("game_ended", username)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Game ended", "game": currentGame})
+}
+
+// GetMyHand retourne la main privée du joueur courant
+func GetMyHand(c *gin.Context) {
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if currentGame == nil {
+		c.JSON(http.StatusOK, gin.H{"hand": []game.Card{}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"hand": currentGame.HandOf(c.GetString("username"))})
+}
+
 // StartGame démarre la partie (réservé à l'hôte)
 func StartGame(c *gin.Context) {
 	username := c.GetString("username")

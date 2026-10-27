@@ -108,6 +108,29 @@ func (gm *GameManager) CreateDebugGame(host string, total int, start bool) *Game
 	return g
 }
 
+// AddDebugBot ajoute un bot à la partie courante (en attente de joueurs).
+func (gm *GameManager) AddDebugBot() (*Player, bool) {
+	gm.mu.Lock()
+	defer gm.mu.Unlock()
+
+	if gm.current == nil {
+		return nil, false
+	}
+
+	existing := gm.current.GetPlayers()
+	for i := 1; ; i++ {
+		name := fmt.Sprintf("%s%d", BotPrefix, i)
+		if _, taken := existing[name]; taken {
+			continue
+		}
+		bot := NewPlayer(name, 0)
+		if !gm.current.AddPlayer(bot) {
+			return nil, false
+		}
+		return bot, true
+	}
+}
+
 // DeleteCurrentGame supprime la partie courante
 func (gm *GameManager) DeleteCurrentGame() {
 	gm.mu.Lock()
