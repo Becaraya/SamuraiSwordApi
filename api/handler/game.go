@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/becaraya/katana-api/api/middleware"
@@ -15,15 +16,15 @@ const disconnectGracePeriod = 15 * time.Second
 // botTurnDelay laisse voir le tour d'un bot (mode debug) avant qu'il ne passe la main.
 const botTurnDelay = 1500 * time.Millisecond
 
-// scheduleBotTurns enchaîne les tours des bots jusqu'à ce qu'un joueur humain doive jouer.
+// scheduleBotTurns enchaîne les actions des bots jusqu'à ce qu'un joueur humain doive agir.
 func scheduleBotTurns() {
 	currentGame := game.GetGameManager().GetCurrentGame()
-	if currentGame == nil || !currentGame.ActiveIsBot() {
+	if currentGame == nil || !currentGame.NeedsBotStep() {
 		return
 	}
 	time.AfterFunc(botTurnDelay, func() {
-		if name, ok := currentGame.PlayBotTurn(); ok {
-			broadcastGameUpdate("turn_changed", name)
+		if name, ok := currentGame.PlayBotStep(); ok {
+			broadcastGameUpdate("bot_action", name)
 			scheduleBotTurns()
 		}
 	})
@@ -197,6 +198,20 @@ func turnError(c *gin.Context, err error) {
 		status, code = http.StatusConflict, "NOT_STARTED"
 	case game.ErrInvalidDiscard:
 		code = "INVALID_DISCARD"
+	case game.ErrAttackPending:
+		status, code = http.StatusConflict, "ATTACK_PENDING"
+	case game.ErrNoAttack:
+		status, code = http.StatusConflict, "NO_ATTACK"
+	case game.ErrNotTarget:
+		status, code = http.StatusForbidden, "NOT_TARGET"
+	case game.ErrNotPlayable:
+		status, code = http.StatusConflict, "NOT_PLAYABLE"
+	case game.ErrInvalidTarget:
+		code = "INVALID_TARGET"
+	case game.ErrInvalidParry:
+		code = "INVALID_PARRY"
+	case game.ErrCardNotFound:
+		status, code = http.StatusNotFound, "CARD_NOT_FOUND"
 	}
 	c.JSON(status, gin.H{"error": err.Error(), "code": code})
 }
@@ -245,15 +260,74 @@ func DiscardCards(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Cards discarded", "game": currentGame})
 }
 
-// GetMyPrivateState retourne la main et le rôle secret du joueur courant
+// GetMyPrivateState retourne la main, le rôle secret et les actions possibles du joueur courant
 func GetMyPrivateState(c *gin.Context) {
 	currentGame := game.GetGameManager().GetCurrentGame()
 	if currentGame == nil {
-		c.JSON(http.StatusOK, gin.H{"hand": []game.Card{}, "role": nil})
+		c.JSON(http.StatusOK, game.PrivateState{Hand: []game.Card{}, Plays: []game.Play{}, ParryCards: []int{}})
 		return
 	}
+	c.JSON(http.StatusOK, currentGame.PrivateState(c.GetString("username")))
+}
+
+// GetTargets liste les cibles possibles de l'arme à l'indice `card` de la main
+func GetTargets(c *gin.Context) {
+	index, err := strconv.Atoi(c.Query("card"))
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if err != nil || currentGame == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	targets, err := currentGame.TargetsFor(c.GetString("username"), index)
+	if err != nil {
+		turnError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"targets": targets})
+}
+
+// PlayWeapon annonce une attaque avec l'arme à l'indice `card` de la main
+func PlayWeapon(c *gin.Context) {
 	username := c.GetString("username")
-	c.JSON(http.StatusOK, gin.H{"hand": currentGame.HandOf(username), "role": currentGame.RoleOf(username)})
+	var body struct {
+		Card   int    `json:"card"`
+		Target string `json:"target"`
+	}
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if err := c.ShouldBindJSON(&body); err != nil || currentGame == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	if err := currentGame.PlayWeapon(username, body.Card, body.Target); err != nil {
+		turnError(c, err)
+		return
+	}
+
+	broadcastGameUpdate("attack", username)
+	scheduleBotTurns()
+	c.JSON(http.StatusOK, gin.H{"message": "Attack announced", "game": currentGame})
+}
+
+// RespondToAttack permet à la cible de parer (carte `card`) ou de subir l'attaque
+func RespondToAttack(c *gin.Context) {
+	username := c.GetString("username")
+	var body struct {
+		Parry bool `json:"parry"`
+		Card  int  `json:"card"`
+	}
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if err := c.ShouldBindJSON(&body); err != nil || currentGame == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	if err := currentGame.Respond(username, body.Parry, body.Card); err != nil {
+		turnError(c, err)
+		return
+	}
+
+	broadcastGameUpdate("respond", username)
+	scheduleBotTurns()
+	c.JSON(http.StatusOK, gin.H{"message": "Response recorded", "game": currentGame})
 }
 
 // StartGame démarre la partie (réservé à l'hôte)

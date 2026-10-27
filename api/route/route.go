@@ -33,6 +33,9 @@ func Setup(env *bootstrap.Env, timeout time.Duration, gin *gin.Engine) {
 		protectedRouter.POST("/game/ready", handler.SetReady)
 		protectedRouter.POST("/game/turn/end", handler.EndTurn)
 		protectedRouter.POST("/game/turn/discard", handler.DiscardCards)
+		protectedRouter.GET("/game/targets", handler.GetTargets)
+		protectedRouter.POST("/game/play", handler.PlayWeapon)
+		protectedRouter.POST("/game/respond", handler.RespondToAttack)
 
 		// Routes de test, jamais exposées hors développement
 		if env.AppEnv == "development" {

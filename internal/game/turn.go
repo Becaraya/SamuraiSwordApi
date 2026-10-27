@@ -3,7 +3,6 @@ package game
 import (
 	"errors"
 	"sort"
-	"strings"
 )
 
 // Phase est une étape du tour d'un joueur.
@@ -58,10 +57,12 @@ func (g *Game) refresh() {
 // beginTurn résout les phases automatiques (récupération, pioche) puis ouvre la phase de jeu.
 func (g *Game) beginTurn(p *Player) {
 	g.Active = p.Name
+	g.Played = 0
 
 	g.Phase = PhaseRecover
 	if p.Life <= 0 {
 		p.Life = p.MaxLife
+		g.logf("info", "%s récupère tous ses PV.", p.Name)
 	}
 
 	g.Phase = PhaseDraw
@@ -73,6 +74,7 @@ func (g *Game) beginTurn(p *Player) {
 		n++
 	}
 	g.drawCards(p, n)
+	g.logf("info", "Tour %d : %s pioche %d cartes.", g.Turn, p.Name, n)
 
 	if g.State == GameStateStarted {
 		g.Phase = PhasePlay
@@ -98,6 +100,7 @@ func (g *Game) reshuffle() bool {
 	g.Deck = g.Discard
 	g.Discard = nil
 	shuffleCards(g.Deck)
+	g.logf("important", "La pioche est épuisée : la défausse est remmélangée et chaque joueur perd 1 point d'honneur.")
 
 	for _, p := range g.Players {
 		p.Honor--
@@ -112,6 +115,7 @@ func (g *Game) reshuffle() bool {
 func (g *Game) finish(reason string) {
 	g.State = GameStateEnded
 	g.EndedReason = reason
+	g.logf("important", "Partie terminée : %s", reason)
 	for _, p := range g.Players {
 		p.PublicRole = p.Role
 	}
@@ -148,8 +152,12 @@ func (g *Game) EndTurn(name string) error {
 	if err := g.checkTurn(name, PhasePlay); err != nil {
 		return err
 	}
+	if g.Pending != nil {
+		return ErrAttackPending
+	}
 	if len(g.Players[name].Hand) > MaxHandSize {
 		g.Phase = PhaseDiscard
+		g.logf("info", "%s doit défausser avant de terminer son tour.", name)
 		return nil
 	}
 	g.nextTurn()
@@ -188,31 +196,6 @@ func (g *Game) DiscardCards(name string, indices []int) error {
 	p.Hand = kept
 	g.nextTurn()
 	return nil
-}
-
-// ActiveIsBot indique si c'est au tour d'un joueur fictif (mode debug).
-func (g *Game) ActiveIsBot() bool {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-	return g.State == GameStateStarted && strings.HasPrefix(g.Active, BotPrefix)
-}
-
-// PlayBotTurn fait passer le tour d'un bot (en défaussant l'excédent) et retourne son nom.
-func (g *Game) PlayBotTurn() (string, bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if g.State != GameStateStarted || !strings.HasPrefix(g.Active, BotPrefix) {
-		return "", false
-	}
-	name := g.Active
-	p := g.Players[name]
-	if extra := len(p.Hand) - MaxHandSize; extra > 0 {
-		g.Discard = append(g.Discard, p.Hand[:extra]...)
-		p.Hand = p.Hand[extra:]
-	}
-	g.nextTurn()
-	return name, true
 }
 
 // SetReady change l'état "prêt" d'un joueur du lobby.
