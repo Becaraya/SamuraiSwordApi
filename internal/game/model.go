@@ -1,6 +1,7 @@
 package game
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,6 +35,8 @@ type Player struct {
 	PublicRole *Role      `json:"role"` // renseigné seulement pour le Shogun
 	Permanents []Card     `json:"permanents"`
 	HandCount  int        `json:"hand_count"`
+	Down       string     `json:"down"` // "", "hp" ou "hand" : joueur à terre (pas éliminé)
+	Ready      bool       `json:"ready"`
 	Hand       []Card     `json:"-"` // privée : exposée uniquement à son propriétaire
 }
 
@@ -45,6 +48,11 @@ type Game struct {
 	CreatedBy  string             `json:"created_by"`
 	CreatedAt  time.Time          `json:"created_at"`
 	MaxPlayers int                `json:"max_players"`
+
+	Active      string `json:"active"` // joueur dont c'est le tour
+	Phase       Phase  `json:"phase"`
+	Turn        int    `json:"turn"`
+	EndedReason string `json:"ended_reason,omitempty"`
 
 	Deck         []Card `json:"-"`
 	Discard      []Card `json:"-"`
@@ -147,7 +155,7 @@ func (g *Game) Host() string {
 	return host
 }
 
-// StartGame démarre la partie
+// StartGame démarre la partie (la vérification des joueurs prêts est faite par le handler)
 func (g *Game) StartGame() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -160,18 +168,22 @@ func (g *Game) StartGame() bool {
 	return false
 }
 
-// EndGame termine la partie lancée et ramène les joueurs au lobby
+// EndGame termine la partie (lancée ou terminée) et ramène les joueurs au lobby
 func (g *Game) EndGame() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	if g.State != GameStateStarted {
+	if g.State != GameStateStarted && g.State != GameStateEnded {
 		return false
 	}
 
 	g.State = GameStateWaiting
 	g.Deck = nil
 	g.Discard = nil
+	g.Active = ""
+	g.Phase = ""
+	g.Turn = 0
+	g.EndedReason = ""
 	g.syncPiles()
 	for _, player := range g.Players {
 		defaults := NewPlayer(player.Name, player.Position)
@@ -180,40 +192,56 @@ func (g *Game) EndGame() bool {
 		player.PublicRole = nil
 		player.Hand = nil
 		player.HandCount = 0
+		player.Down = ""
+		player.Ready = strings.HasPrefix(player.Name, BotPrefix)
 		player.Permanents = defaults.Permanents
 		player.Life = defaults.Life
 		player.MaxLife = defaults.MaxLife
+		player.Honor = defaults.Honor
 	}
 	return true
 }
 
-// deal attribue un personnage et une main de départ à chaque joueur (verrou déjà pris).
+// deal attribue personnage, rôle, honneur et main de départ, puis lance le tour du Shogun (verrou déjà pris).
 func (g *Game) deal() {
 	g.Deck = buildDeck()
 	g.Discard = nil
 
+	players := g.sortedPlayers()
 	chars := shuffledCharacters()
-	dealtRoles := shuffledRoles(len(g.Players))
-	i := 0
-	for _, player := range g.Players {
+	dealtRoles := shuffledRoles(len(players))
+	shogunHonor, othersHonor := startingHonor(len(players))
+
+	shogunIdx := 0
+	for i, player := range players {
 		character := chars[i%len(chars)]
 		role := dealtRoles[i%len(dealtRoles)]
-		i++
 		player.Character = &character
 		player.Role = &role
 		player.PublicRole = nil
+		player.Honor = othersHonor
 		if role.ID == RoleShogun {
 			player.PublicRole = &role
+			player.Honor = shogunHonor
+			shogunIdx = i
 		}
 		player.Life = character.Life
 		player.MaxLife = character.Life
 		player.Permanents = []Card{}
-		player.Hand = append([]Card(nil), g.Deck[:StartingHandSize]...)
-		player.HandCount = len(player.Hand)
-		g.Deck = g.Deck[StartingHandSize:]
+		player.Hand = nil
 	}
 
-	g.syncPiles()
+	// La main de départ dépend de l'ordre de jeu, à partir du Shogun.
+	for k := range players {
+		player := players[(shogunIdx+k)%len(players)]
+		size := startingHandSize(k)
+		player.Hand = append([]Card(nil), g.Deck[:size]...)
+		g.Deck = g.Deck[size:]
+	}
+
+	g.Turn = 1
+	g.Active = players[shogunIdx].Name
+	g.beginTurn(players[shogunIdx])
 }
 
 // syncPiles met à jour les compteurs publics de la pioche et de la défausse.

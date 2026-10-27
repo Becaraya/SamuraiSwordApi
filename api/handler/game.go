@@ -12,6 +12,23 @@ import (
 // disconnectGracePeriod laisse le temps à un joueur de recharger la page sans perdre sa place.
 const disconnectGracePeriod = 15 * time.Second
 
+// botTurnDelay laisse voir le tour d'un bot (mode debug) avant qu'il ne passe la main.
+const botTurnDelay = 1500 * time.Millisecond
+
+// scheduleBotTurns enchaîne les tours des bots jusqu'à ce qu'un joueur humain doive jouer.
+func scheduleBotTurns() {
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if currentGame == nil || !currentGame.ActiveIsBot() {
+		return
+	}
+	time.AfterFunc(botTurnDelay, func() {
+		if name, ok := currentGame.PlayBotTurn(); ok {
+			broadcastGameUpdate("turn_changed", name)
+			scheduleBotTurns()
+		}
+	})
+}
+
 // gameSnapshot construit l'état complet du lobby envoyé aux clients (HTTP et WebSocket).
 func gameSnapshot() gin.H {
 	currentGame := game.GetGameManager().GetCurrentGame()
@@ -139,6 +156,95 @@ func EndGame(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Game ended", "game": currentGame})
 }
 
+// SetReady marque le joueur courant comme prêt (ou non) dans le lobby
+func SetReady(c *gin.Context) {
+	username := c.GetString("username")
+	var body struct {
+		Ready bool `json:"ready"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid body"})
+		return
+	}
+
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if currentGame == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No active game"})
+		return
+	}
+	if _, inGame := currentGame.GetPlayers()[username]; !inGame {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not in this game"})
+		return
+	}
+	if err := currentGame.SetReady(username, body.Ready); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": "GAME_IN_PROGRESS"})
+		return
+	}
+
+	broadcastGameUpdate("player_ready", username)
+	c.JSON(http.StatusOK, gin.H{"message": "Ready state updated", "ready": body.Ready})
+}
+
+// turnError traduit une erreur de tour en réponse HTTP
+func turnError(c *gin.Context, err error) {
+	status, code := http.StatusBadRequest, "INVALID_ACTION"
+	switch err {
+	case game.ErrNotYourTurn:
+		status, code = http.StatusForbidden, "NOT_YOUR_TURN"
+	case game.ErrWrongPhase:
+		status, code = http.StatusConflict, "WRONG_PHASE"
+	case game.ErrNotStarted:
+		status, code = http.StatusConflict, "NOT_STARTED"
+	case game.ErrInvalidDiscard:
+		code = "INVALID_DISCARD"
+	}
+	c.JSON(status, gin.H{"error": err.Error(), "code": code})
+}
+
+// EndTurn termine la phase de jeu du joueur actif
+func EndTurn(c *gin.Context) {
+	username := c.GetString("username")
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if currentGame == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No active game"})
+		return
+	}
+	if err := currentGame.EndTurn(username); err != nil {
+		turnError(c, err)
+		return
+	}
+
+	broadcastGameUpdate("turn_changed", username)
+	scheduleBotTurns()
+	c.JSON(http.StatusOK, gin.H{"message": "Turn ended", "game": currentGame})
+}
+
+// DiscardCards défausse les cartes exigées en fin de tour (indices dans la main)
+func DiscardCards(c *gin.Context) {
+	username := c.GetString("username")
+	var body struct {
+		Cards []int `json:"cards"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid body"})
+		return
+	}
+
+	currentGame := game.GetGameManager().GetCurrentGame()
+	if currentGame == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No active game"})
+		return
+	}
+	if err := currentGame.DiscardCards(username, body.Cards); err != nil {
+		turnError(c, err)
+		return
+	}
+
+	broadcastGameUpdate("turn_changed", username)
+	scheduleBotTurns()
+	c.JSON(http.StatusOK, gin.H{"message": "Cards discarded", "game": currentGame})
+}
+
 // GetMyPrivateState retourne la main et le rôle secret du joueur courant
 func GetMyPrivateState(c *gin.Context) {
 	currentGame := game.GetGameManager().GetCurrentGame()
@@ -180,12 +286,18 @@ func StartGame(c *gin.Context) {
 		return
 	}
 
+	if !currentGame.AllReady(username) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "All players must be ready", "code": "NOT_READY"})
+		return
+	}
+
 	if !currentGame.StartGame() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot start game"})
 		return
 	}
 
 	broadcastGameUpdate("game_started", username)
+	scheduleBotTurns()
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Game started successfully",

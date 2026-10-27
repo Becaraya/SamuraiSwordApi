@@ -95,6 +95,7 @@ func (gm *GameManager) CreateDebugGame(host string, total int, start bool) *Game
 
 	for i := 1; i < total; i++ {
 		bot := NewPlayer(fmt.Sprintf("%s%d", BotPrefix, i), 0)
+		bot.Ready = true
 		bot.JoinedAt = now.Add(time.Duration(i) * time.Millisecond)
 		g.AddPlayer(bot)
 	}
@@ -124,6 +125,7 @@ func (gm *GameManager) AddDebugBot() (*Player, bool) {
 			continue
 		}
 		bot := NewPlayer(name, 0)
+		bot.Ready = true
 		if !gm.current.AddPlayer(bot) {
 			return nil, false
 		}

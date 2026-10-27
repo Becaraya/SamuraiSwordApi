@@ -11,9 +11,6 @@ import (
 	"github.com/becaraya/katana-api/assets"
 )
 
-// StartingHandSize est le nombre de cartes distribuées à chaque joueur au lancement.
-const StartingHandSize = 4
-
 // Card représente une carte du deck.
 type Card struct {
 	ID        string `json:"id"`
@@ -53,6 +50,8 @@ var (
 	characters  []Character
 	roles       []Role
 	rolePrep    map[string]map[string]int
+	honorSetup  map[string][2]int // [honneur du Shogun, honneur des autres]
+	handSizes   []int
 	loadFailure error
 )
 
@@ -84,8 +83,11 @@ func loadData() {
 			Stars int    `json:"etoiles"`
 		} `json:"roles"`
 		Setup map[string]struct {
-			Roles map[string]int `json:"roles"`
+			Roles       map[string]int `json:"roles"`
+			ShogunHonor int            `json:"honneur_shogun"`
+			OthersHonor int            `json:"honneur_autres"`
 		} `json:"preparation"`
+		HandSizes []int `json:"main_depart_par_place"`
 	}
 
 	for file, target := range map[string]any{
@@ -116,9 +118,29 @@ func loadData() {
 		roles = append(roles, Role{ID: r.ID, Name: r.Name, Camp: r.Camp, Stars: r.Stars})
 	}
 	rolePrep = make(map[string]map[string]int, len(rawRoles.Setup))
+	honorSetup = make(map[string][2]int, len(rawRoles.Setup))
 	for count, setup := range rawRoles.Setup {
 		rolePrep[count] = setup.Roles
+		honorSetup[count] = [2]int{setup.ShogunHonor, setup.OthersHonor}
 	}
+	handSizes = rawRoles.HandSizes
+}
+
+// startingHonor retourne l'honneur initial du Shogun et des autres joueurs.
+func startingHonor(playerCount int) (shogun, others int) {
+	loadOnce.Do(loadData)
+	h := honorSetup[strconv.Itoa(playerCount)]
+	return h[0], h[1]
+}
+
+// startingHandSize retourne la taille de la main de départ du joueur placé en k-ième position à partir du Shogun.
+func startingHandSize(k int) int {
+	loadOnce.Do(loadData)
+	return handSizes[k%len(handSizes)]
+}
+
+func shuffleCards(cards []Card) {
+	rand.Shuffle(len(cards), func(i, j int) { cards[i], cards[j] = cards[j], cards[i] })
 }
 
 // buildDeck retourne un deck complet mélangé.

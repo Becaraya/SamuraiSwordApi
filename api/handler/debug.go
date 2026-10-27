@@ -31,6 +31,7 @@ func DebugCreateGame(c *gin.Context) {
 		event = "game_started"
 	}
 	broadcastGameUpdate(event, username)
+	scheduleBotTurns()
 
 	c.JSON(http.StatusOK, gin.H{"message": "Debug game created", "game": g, "players": g.GetPlayers()})
 }
