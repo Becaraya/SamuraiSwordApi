@@ -30,6 +30,8 @@ type Player struct {
 	Honor      int        `json:"honor"`
 	JoinedAt   time.Time  `json:"joined_at"`
 	Character  *Character `json:"character"`
+	Role       *Role      `json:"-"`    // privé : exposé uniquement à son propriétaire
+	PublicRole *Role      `json:"role"` // renseigné seulement pour le Shogun
 	Permanents []Card     `json:"permanents"`
 	HandCount  int        `json:"hand_count"`
 	Hand       []Card     `json:"-"` // privée : exposée uniquement à son propriétaire
@@ -68,8 +70,8 @@ func NewGame(createdBy string) *Game {
 // NewPlayer crée un nouveau joueur avec les valeurs par défaut
 func NewPlayer(name string, position int) *Player {
 	return &Player{
-		Name:     name,
-		Position: position,
+		Name:       name,
+		Position:   position,
 		Life:       4, // Valeur par défaut
 		MaxLife:    4,
 		Honor:      4, // Valeur par défaut
@@ -174,6 +176,8 @@ func (g *Game) EndGame() bool {
 	for _, player := range g.Players {
 		defaults := NewPlayer(player.Name, player.Position)
 		player.Character = nil
+		player.Role = nil
+		player.PublicRole = nil
 		player.Hand = nil
 		player.HandCount = 0
 		player.Permanents = defaults.Permanents
@@ -189,11 +193,18 @@ func (g *Game) deal() {
 	g.Discard = nil
 
 	chars := shuffledCharacters()
+	dealtRoles := shuffledRoles(len(g.Players))
 	i := 0
 	for _, player := range g.Players {
 		character := chars[i%len(chars)]
+		role := dealtRoles[i%len(dealtRoles)]
 		i++
 		player.Character = &character
+		player.Role = &role
+		player.PublicRole = nil
+		if role.ID == RoleShogun {
+			player.PublicRole = &role
+		}
 		player.Life = character.Life
 		player.MaxLife = character.Life
 		player.Permanents = []Card{}
@@ -226,6 +237,17 @@ func (g *Game) HandOf(playerName string) []Card {
 		hand = append(hand, player.Hand...)
 	}
 	return hand
+}
+
+// RoleOf retourne le rôle secret d'un joueur (nil si inconnu ou partie non lancée).
+func (g *Game) RoleOf(playerName string) *Role {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if player, ok := g.Players[playerName]; ok {
+		return player.Role
+	}
+	return nil
 }
 
 // getNextPosition trouve la prochaine position disponible

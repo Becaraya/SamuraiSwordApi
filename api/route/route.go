@@ -25,7 +25,7 @@ func Setup(env *bootstrap.Env, timeout time.Duration, gin *gin.Engine) {
 		protectedRouter.GET("/tokens", handler.ListTokens)
 		protectedRouter.POST("/logout", handler.Logout)
 		protectedRouter.GET("/game", handler.GetGameState)
-		protectedRouter.GET("/game/hand", handler.GetMyHand)
+		protectedRouter.GET("/game/me", handler.GetMyPrivateState)
 		protectedRouter.POST("/game/join", handler.JoinGame)
 		protectedRouter.POST("/game/leave", handler.LeaveGame)
 		protectedRouter.POST("/game/start", handler.StartGame)

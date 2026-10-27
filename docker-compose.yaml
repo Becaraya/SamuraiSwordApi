@@ -2,7 +2,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     image: app
     container_name: app
     restart: unless-stopped
@@ -25,3 +25,4 @@ services:
             - README.md
             - Dockerfile*
             - docker-compose.yaml
+            - build-errors.log

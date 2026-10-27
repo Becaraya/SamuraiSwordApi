@@ -139,14 +139,15 @@ func EndGame(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Game ended", "game": currentGame})
 }
 
-// GetMyHand retourne la main privée du joueur courant
-func GetMyHand(c *gin.Context) {
+// GetMyPrivateState retourne la main et le rôle secret du joueur courant
+func GetMyPrivateState(c *gin.Context) {
 	currentGame := game.GetGameManager().GetCurrentGame()
 	if currentGame == nil {
-		c.JSON(http.StatusOK, gin.H{"hand": []game.Card{}})
+		c.JSON(http.StatusOK, gin.H{"hand": []game.Card{}, "role": nil})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"hand": currentGame.HandOf(c.GetString("username"))})
+	username := c.GetString("username")
+	c.JSON(http.StatusOK, gin.H{"hand": currentGame.HandOf(username), "role": currentGame.RoleOf(username)})
 }
 
 // StartGame démarre la partie (réservé à l'hôte)
