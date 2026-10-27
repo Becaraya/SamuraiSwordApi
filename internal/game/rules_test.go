@@ -60,7 +60,7 @@ func TestWeaponTargetsMatchPrototype(t *testing.T) {
 
 func TestParryCancelsDamage(t *testing.T) {
 	g := table7()
-	if err := g.PlayWeapon("Aiko", 0, "Sayuri"); err != nil {
+	if err := g.PlayCard("Aiko", 0, "Sayuri", ""); err != nil {
 		t.Fatal(err)
 	}
 	if g.Pending == nil || g.Pending.Damage.Total != 3 {
@@ -87,7 +87,7 @@ func TestParryCancelsDamage(t *testing.T) {
 func TestUnparriedKillTransfersHonorAndUpdatesTargets(t *testing.T) {
 	g := table7()
 	g.Players["Sayuri"].Hand = []Card{geisha, geisha}
-	if err := g.PlayWeapon("Aiko", 0, "Sayuri"); err != nil {
+	if err := g.PlayCard("Aiko", 0, "Sayuri", ""); err != nil {
 		t.Fatal(err)
 	}
 	// Aucune parade : résolution automatique.
@@ -116,10 +116,10 @@ func TestWeaponLimitAndPlayability(t *testing.T) {
 	if p := g.playability(g.Players["Aiko"], parade); p.OK {
 		t.Fatal("a parry cannot be played on your own turn")
 	}
-	if err := g.PlayWeapon("Aiko", 0, "Haruka"); err != ErrInvalidTarget {
+	if err := g.PlayCard("Aiko", 0, "Haruka", ""); err != ErrInvalidTarget {
 		t.Fatalf("down target must be refused, got %v", err)
 	}
-	if err := g.PlayWeapon("Kenji", 0, "Aiko"); err != ErrNotYourTurn {
+	if err := g.PlayCard("Kenji", 0, "Aiko", ""); err != ErrNotYourTurn {
 		t.Fatalf("expected ErrNotYourTurn, got %v", err)
 	}
 }

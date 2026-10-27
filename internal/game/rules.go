@@ -32,20 +32,28 @@ type Attack struct {
 	Damage     Calc   `json:"damage"`
 }
 
-// Target décrit une cible possible (ou non) d'une arme.
+// Option est un choix à faire une fois la cible sélectionnée (ex. Geisha : quelle carte défausser).
+type Option struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// Target décrit une cible possible (ou non) d'une carte.
 type Target struct {
-	Name       string `json:"name"`
-	OK         bool   `json:"ok"`
-	Short      string `json:"short"`
-	Reason     string `json:"reason,omitempty"`
-	Difficulty *Calc  `json:"difficulty,omitempty"`
-	Damage     *Calc  `json:"damage,omitempty"`
+	Name       string   `json:"name"`
+	OK         bool     `json:"ok"`
+	Short      string   `json:"short"`
+	Reason     string   `json:"reason,omitempty"`
+	Difficulty *Calc    `json:"difficulty,omitempty"`
+	Damage     *Calc    `json:"damage,omitempty"`
+	Options    []Option `json:"options,omitempty"`
 }
 
 // Play indique si une carte de la main est jouable maintenant, et pourquoi sinon.
 type Play struct {
-	OK     bool   `json:"ok"`
-	Reason string `json:"reason,omitempty"`
+	OK          bool   `json:"ok"`
+	NeedsTarget bool   `json:"needs_target,omitempty"`
+	Reason      string `json:"reason,omitempty"`
 }
 
 func countCards(cards []Card, id string) int {
@@ -213,31 +221,4 @@ func (g *Game) parryOptions(p *Player) []int {
 		}
 	}
 	return idx
-}
-
-// playability évalue une carte de la main du joueur dans l'état courant.
-func (g *Game) playability(p *Player, c Card) Play {
-	switch {
-	case g.State != GameStateStarted:
-		return Play{Reason: "La partie n'est pas en cours."}
-	case g.Pending != nil:
-		return Play{Reason: "Une attaque est en cours de résolution."}
-	case c.ID == "parade":
-		return Play{Reason: "Une Parade se joue en réaction à une attaque qui vous cible, même hors de votre tour."}
-	case g.Active != p.Name:
-		return Play{Reason: "Cette carte n'est jouable que pendant votre tour."}
-	case g.Phase != PhasePlay:
-		return Play{Reason: "Les cartes se jouent pendant la phase de jeu."}
-	case c.Category != "arme":
-		return Play{Reason: "L'effet de cette carte n'est pas encore disponible."}
-	}
-	if limit := g.weaponLimit(p); g.Played >= limit.Total {
-		return Play{Reason: fmt.Sprintf("Vous avez déjà joué le maximum d'armes ce tour (%d/%d).", g.Played, limit.Total)}
-	}
-	for _, t := range g.weaponTargets(p, c) {
-		if t.OK {
-			return Play{OK: true}
-		}
-	}
-	return Play{Reason: "Aucune cible valide : toutes les cibles sont à terre ou hors de portée."}
 }

@@ -49,13 +49,16 @@ type Game struct {
 	CreatedAt  time.Time          `json:"created_at"`
 	MaxPlayers int                `json:"max_players"`
 
-	Active      string     `json:"active"` // joueur dont c'est le tour
-	Phase       Phase      `json:"phase"`
-	Turn        int        `json:"turn"`
-	Played      int        `json:"played"` // armes jouées ce tour
-	Pending     *Attack    `json:"pending"`
-	Log         []LogEntry `json:"log"`
-	EndedReason string     `json:"ended_reason,omitempty"`
+	Active      string         `json:"active"` // joueur dont c'est le tour
+	Phase       Phase          `json:"phase"`
+	Turn        int            `json:"turn"`
+	Played      int            `json:"played"` // armes jouées ce tour
+	Pending     *Attack        `json:"pending"`
+	Collective  *Collective    `json:"collective"`
+	Bushido     *BushidoChoice `json:"bushido"`
+	Results     *Results       `json:"results,omitempty"`
+	Log         []LogEntry     `json:"log"`
+	EndedReason string         `json:"ended_reason,omitempty"`
 
 	Deck         []Card `json:"-"`
 	Discard      []Card `json:"-"`
@@ -188,8 +191,11 @@ func (g *Game) EndGame() bool {
 	g.Turn = 0
 	g.Played = 0
 	g.Pending = nil
+	g.Collective = nil
+	g.Bushido = nil
 	g.Log = nil
 	g.EndedReason = ""
+	g.Results = nil
 	g.syncPiles()
 	for _, player := range g.Players {
 		defaults := NewPlayer(player.Name, player.Position)
@@ -248,6 +254,8 @@ func (g *Game) deal() {
 	g.Turn = 1
 	g.Log = nil
 	g.Pending = nil
+	g.Collective = nil
+	g.Bushido = nil
 	g.logf("important", "La partie commence. %s (Shogun) joue en premier.", players[shogunIdx].Name)
 	g.beginTurn(players[shogunIdx])
 }

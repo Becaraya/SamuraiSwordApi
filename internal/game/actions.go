@@ -7,13 +7,13 @@ import (
 )
 
 var (
-	ErrAttackPending = errors.New("an attack is waiting for a response")
-	ErrNoAttack      = errors.New("no attack to respond to")
-	ErrNotTarget     = errors.New("you are not the target of this attack")
+	ErrAttackPending = errors.New("a resolution is waiting for a response")
+	ErrNoAttack      = errors.New("nothing to respond to")
+	ErrNotTarget     = errors.New("you are not the one who must respond")
 	ErrCardNotFound  = errors.New("card not found in hand")
 	ErrNotPlayable   = errors.New("this card cannot be played now")
-	ErrInvalidTarget = errors.New("invalid target")
-	ErrInvalidParry  = errors.New("this card cannot be used as a parry")
+	ErrInvalidTarget = errors.New("invalid target or option")
+	ErrInvalidParry  = errors.New("this card cannot be used to respond")
 )
 
 // LogEntry est un événement public du journal de la partie.
@@ -33,18 +33,18 @@ func (g *Game) logf(kind, format string, args ...any) {
 
 // PrivateState regroupe ce que seul le joueur concerné peut voir.
 type PrivateState struct {
-	Hand        []Card `json:"hand"`
-	Role        *Role  `json:"role"`
-	Plays       []Play `json:"plays"`
-	ParryCards  []int  `json:"parry_cards"`
-	WeaponLimit *Calc  `json:"weapon_limit"`
+	Hand          []Card `json:"hand"`
+	Role          *Role  `json:"role"`
+	Plays         []Play `json:"plays"`
+	ResponseCards []int  `json:"response_cards"` // cartes utilisables pour la réponse qu'on attend de moi
+	WeaponLimit   *Calc  `json:"weapon_limit"`
 }
 
 func (g *Game) PrivateState(name string) PrivateState {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 
-	state := PrivateState{Hand: []Card{}, Plays: []Play{}, ParryCards: []int{}}
+	state := PrivateState{Hand: []Card{}, Plays: []Play{}, ResponseCards: []int{}}
 	p, ok := g.Players[name]
 	if !ok {
 		return state
@@ -57,15 +57,23 @@ func (g *Game) PrivateState(name string) PrivateState {
 	for _, c := range p.Hand {
 		state.Plays = append(state.Plays, g.playability(p, c))
 	}
-	if g.Pending != nil && g.Pending.Target == name {
-		state.ParryCards = g.parryOptions(p)
+	switch {
+	case g.Pending != nil && g.Pending.Target == name:
+		state.ResponseCards = g.parryOptions(p)
+	case g.collectivePending(name):
+		state.ResponseCards = g.collectiveOptions(g.Collective.Card, p)
+	case g.Bushido != nil && g.Bushido.Player == name:
+		state.ResponseCards = weaponIndices(p)
+	}
+	if state.ResponseCards == nil {
+		state.ResponseCards = []int{}
 	}
 	limit := g.weaponLimit(p)
 	state.WeaponLimit = &limit
 	return state
 }
 
-// TargetsFor liste les cibles possibles de l'arme située à l'indice donné de la main du joueur.
+// TargetsFor liste les cibles possibles de la carte située à l'indice donné de la main du joueur.
 func (g *Game) TargetsFor(name string, cardIndex int) ([]Target, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -74,80 +82,99 @@ func (g *Game) TargetsFor(name string, cardIndex int) ([]Target, error) {
 	if !ok || cardIndex < 0 || cardIndex >= len(p.Hand) {
 		return nil, ErrCardNotFound
 	}
-	if p.Hand[cardIndex].Category != "arme" {
+	card := p.Hand[cardIndex]
+	if !g.playability(p, card).NeedsTarget {
 		return nil, ErrNotPlayable
 	}
-	return g.weaponTargets(p, p.Hand[cardIndex]), nil
+	return g.cardTargets(p, card), nil
 }
 
-// PlayWeapon annonce une attaque. Sans parade possible, elle est résolue immédiatement.
-func (g *Game) PlayWeapon(name string, cardIndex int, targetName string) error {
+// declareAttack retire l'arme de la main, annonce l'attaque et la résout si la cible ne peut pas parer.
+func (g *Game) declareAttack(att *Player, idx int, t Target) {
+	weapon := att.Hand[idx]
+	att.Hand = append(att.Hand[:idx], att.Hand[idx+1:]...)
+	g.Discard = append(g.Discard, weapon)
+	g.Played++
+	g.Pending = &Attack{Attacker: att.Name, Target: t.Name, Weapon: weapon, Difficulty: *t.Difficulty, Damage: *t.Damage}
+	g.logf("action", "%s attaque %s avec %s (dégâts potentiels : %d).", att.Name, t.Name, weapon.Name, t.Damage.Total)
+
+	if len(g.parryOptions(g.Players[t.Name])) == 0 {
+		g.logf("info", "%s n'a aucune parade utilisable.", t.Name)
+		g.resolveAttack()
+	}
+}
+
+// PlayCard joue la carte à l'indice donné ; `target` et `option` précisent la cible et le choix éventuel.
+func (g *Game) PlayCard(name string, cardIndex int, targetName, option string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	if g.State != GameStateStarted {
 		return ErrNotStarted
 	}
-	att := g.Players[name]
-	if att == nil || cardIndex < 0 || cardIndex >= len(att.Hand) {
+	p := g.Players[name]
+	if p == nil || cardIndex < 0 || cardIndex >= len(p.Hand) {
 		return ErrCardNotFound
 	}
-	if g.Pending != nil {
+	if g.busy() {
 		return ErrAttackPending
 	}
 	if g.Active != name {
 		return ErrNotYourTurn
 	}
-	weapon := att.Hand[cardIndex]
-	if p := g.playability(att, weapon); !p.OK {
+	card := p.Hand[cardIndex]
+	pl := g.playability(p, card)
+	if !pl.OK {
 		if g.Phase != PhasePlay {
 			return ErrWrongPhase
 		}
 		return ErrNotPlayable
 	}
 
-	tgt := g.Players[targetName]
-	if tgt == nil || tgt == att {
-		return ErrInvalidTarget
-	}
 	var chosen *Target
-	for _, t := range g.weaponTargets(att, weapon) {
-		if t.Name == targetName {
-			t := t
-			chosen = &t
+	if pl.NeedsTarget {
+		for _, t := range g.cardTargets(p, card) {
+			if t.Name == targetName {
+				t := t
+				chosen = &t
+			}
+		}
+		if chosen == nil || !chosen.OK {
+			return ErrInvalidTarget
 		}
 	}
-	if chosen == nil || !chosen.OK {
-		return ErrInvalidTarget
-	}
 
-	att.Hand = append(att.Hand[:cardIndex], att.Hand[cardIndex+1:]...)
-	g.Discard = append(g.Discard, weapon)
-	g.Played++
-	g.Pending = &Attack{Attacker: name, Target: targetName, Weapon: weapon, Difficulty: *chosen.Difficulty, Damage: *chosen.Damage}
-	g.logf("action", "%s attaque %s avec %s (dégâts potentiels : %d).", name, targetName, weapon.Name, chosen.Damage.Total)
-
-	if len(g.parryOptions(tgt)) == 0 {
-		g.logf("info", "%s n'a aucune parade utilisable.", targetName)
-		g.resolveAttack()
+	if card.Category == "arme" {
+		g.declareAttack(p, cardIndex, *chosen)
+	} else if err := g.applyEffect(p, cardIndex, chosen, option); err != nil {
+		return err
 	}
 	g.refresh()
 	return nil
 }
 
-// Respond permet à la cible de parer (carte de la main) ou de subir l'attaque.
-func (g *Game) Respond(name string, parry bool, cardIndex int) error {
+// Respond permet de répondre à ce qu'on attend de soi : attaque, Cri de guerre / Ju Jitsu ou Code du Bushido.
+// `useCard` désigne la carte à défausser (parade, arme...), sinon on subit la conséquence.
+func (g *Game) Respond(name string, useCard bool, cardIndex int) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	return g.respond(name, useCard, cardIndex)
+}
 
-	if g.Pending == nil {
+func (g *Game) respond(name string, useCard bool, cardIndex int) error {
+	switch {
+	case g.Collective != nil:
+		return g.respondCollective(name, useCard, cardIndex)
+	case g.Bushido != nil:
+		return g.respondBushido(name, useCard, cardIndex)
+	case g.Pending == nil:
 		return ErrNoAttack
-	}
-	if g.Pending.Target != name {
+	case g.Pending.Target != name:
 		return ErrNotTarget
 	}
+
 	tgt := g.Players[name]
-	if parry {
+	if useCard {
 		valid := false
 		for _, i := range g.parryOptions(tgt) {
 			valid = valid || i == cardIndex
@@ -167,19 +194,41 @@ func (g *Game) Respond(name string, parry bool, cardIndex int) error {
 	return nil
 }
 
-// resolveAttack applique les dégâts de l'attaque en attente (verrou déjà pris).
-func (g *Game) resolveAttack() {
-	a := g.Pending
-	g.Pending = nil
-	att, tgt := g.Players[a.Attacker], g.Players[a.Target]
-
-	lost := a.Damage.Total
+// hurt retire des PV à un joueur ; à 0 PV il perd 1 point d'honneur au profit de `att`.
+func (g *Game) hurt(att, tgt *Player, amount int) int {
+	lost := amount
 	if lost > tgt.Life {
 		lost = tgt.Life
 	}
 	tgt.Life -= lost
 	g.logf("action", "%s subit %d dégât(s) et passe à %d/%d PV.", tgt.Name, lost, tgt.Life, tgt.MaxLife)
 
+	if lost > 0 && tgt.Life == 0 {
+		tgt.Honor--
+		att.Honor++
+		g.logf("important", "%s est vaincu·e : perd 1 point d'honneur, %s en gagne 1.", tgt.Name, att.Name)
+		g.checkHonor()
+		g.checkLastStanding()
+	}
+	return lost
+}
+
+// checkHonor termine la partie dès qu'un joueur n'a plus de point d'honneur.
+func (g *Game) checkHonor() {
+	for _, p := range g.sortedPlayers() {
+		if p.Honor <= 0 && g.State == GameStateStarted {
+			g.finish(fmt.Sprintf("%s a atteint 0 point d'honneur.", p.Name))
+		}
+	}
+}
+
+// resolveAttack applique les dégâts de l'attaque en attente (verrou déjà pris).
+func (g *Game) resolveAttack() {
+	a := g.Pending
+	g.Pending = nil
+	att, tgt := g.Players[a.Attacker], g.Players[a.Target]
+
+	lost := g.hurt(att, tgt, a.Damage.Total)
 	if lost > 0 {
 		switch att.characterID() {
 		case "tomoe":
@@ -190,20 +239,9 @@ func (g *Game) resolveAttack() {
 			g.logf("info", "Ushiwaka pioche %d carte(s) (PV perdus à cause de son arme).", lost)
 		}
 	}
-
-	if tgt.Life == 0 {
-		tgt.Honor--
-		att.Honor++
-		g.logf("important", "%s est vaincu·e : perd 1 point d'honneur, %s en gagne 1.", tgt.Name, att.Name)
-		for _, p := range g.sortedPlayers() {
-			if p.Honor <= 0 && g.State == GameStateStarted {
-				g.finish(fmt.Sprintf("%s a atteint 0 point d'honneur.", p.Name))
-			}
-		}
-	}
 }
 
-// NeedsBotStep indique si un bot doit agir (tour de bot ou réponse d'un bot à une attaque).
+// NeedsBotStep indique si un bot doit agir (tour de bot ou réponse d'un bot).
 func (g *Game) NeedsBotStep() bool {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -211,13 +249,25 @@ func (g *Game) NeedsBotStep() bool {
 	if g.State != GameStateStarted {
 		return false
 	}
-	if g.Pending != nil {
-		return strings.HasPrefix(g.Pending.Target, BotPrefix)
+	switch {
+	case g.Pending != nil:
+		return isBotName(g.Pending.Target)
+	case g.Collective != nil:
+		for _, r := range g.Collective.Rows {
+			if r.Status == "pending" && isBotName(r.Name) {
+				return true
+			}
+		}
+		return false
+	case g.Bushido != nil:
+		return isBotName(g.Bushido.Player)
 	}
-	return strings.HasPrefix(g.Active, BotPrefix)
+	return isBotName(g.Active)
 }
 
-// PlayBotStep fait agir un bot : réponse à une attaque, attaque d'un joueur, ou fin de tour. Retourne l'acteur.
+func isBotName(name string) bool { return strings.HasPrefix(name, BotPrefix) }
+
+// PlayBotStep fait agir un bot : réponse, attaque d'un joueur, ou fin de tour. Retourne l'acteur.
 func (g *Game) PlayBotStep() (string, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -226,25 +276,33 @@ func (g *Game) PlayBotStep() (string, bool) {
 		return "", false
 	}
 
-	if g.Pending != nil {
+	switch {
+	case g.Pending != nil:
 		bot := g.Players[g.Pending.Target]
-		if !strings.HasPrefix(bot.Name, BotPrefix) {
+		if !isBotName(bot.Name) {
 			return "", false
 		}
-		if options := g.parryOptions(bot); len(options) > 0 {
-			card := bot.Hand[options[0]]
-			bot.Hand = append(bot.Hand[:options[0]], bot.Hand[options[0]+1:]...)
-			g.Discard = append(g.Discard, card)
-			g.logf("action", "%s pare l'attaque de %s avec %s : aucun dégât.", bot.Name, g.Pending.Attacker, card.Name)
-			g.Pending = nil
-		} else {
-			g.resolveAttack()
+		options := g.parryOptions(bot)
+		g.botRespond(bot.Name, options)
+		return bot.Name, true
+	case g.Collective != nil:
+		for _, r := range g.Collective.Rows {
+			if r.Status == "pending" && isBotName(r.Name) {
+				g.botRespond(r.Name, g.collectiveOptions(g.Collective.Card, g.Players[r.Name]))
+				return r.Name, true
+			}
 		}
-		g.refresh()
+		return "", false
+	case g.Bushido != nil:
+		bot := g.Players[g.Bushido.Player]
+		if !isBotName(bot.Name) {
+			return "", false
+		}
+		g.botRespond(bot.Name, weaponIndices(bot))
 		return bot.Name, true
 	}
 
-	if !strings.HasPrefix(g.Active, BotPrefix) {
+	if !isBotName(g.Active) {
 		return "", false
 	}
 	bot := g.Players[g.Active]
@@ -258,23 +316,14 @@ func (g *Game) PlayBotStep() (string, bool) {
 			var pick *Target
 			for _, t := range g.weaponTargets(bot, c) {
 				t := t
-				if t.OK && (pick == nil || (strings.HasPrefix(pick.Name, BotPrefix) && !strings.HasPrefix(t.Name, BotPrefix))) {
+				if t.OK && (pick == nil || (isBotName(pick.Name) && !isBotName(t.Name))) {
 					pick = &t
 				}
 			}
 			if pick == nil {
 				continue
 			}
-			tgt := g.Players[pick.Name]
-			bot.Hand = append(bot.Hand[:i], bot.Hand[i+1:]...)
-			g.Discard = append(g.Discard, c)
-			g.Played++
-			g.Pending = &Attack{Attacker: bot.Name, Target: tgt.Name, Weapon: c, Difficulty: *pick.Difficulty, Damage: *pick.Damage}
-			g.logf("action", "%s attaque %s avec %s (dégâts potentiels : %d).", bot.Name, tgt.Name, c.Name, pick.Damage.Total)
-			if len(g.parryOptions(tgt)) == 0 {
-				g.logf("info", "%s n'a aucune parade utilisable.", tgt.Name)
-				g.resolveAttack()
-			}
+			g.declareAttack(bot, i, *pick)
 			g.refresh()
 			return bot.Name, true
 		}
@@ -286,4 +335,13 @@ func (g *Game) PlayBotStep() (string, bool) {
 	}
 	g.nextTurn()
 	return bot.Name, true
+}
+
+// botRespond répond pour un bot : première carte valide si elle existe, sinon on subit (verrou déjà pris).
+func (g *Game) botRespond(name string, options []int) {
+	if len(options) > 0 {
+		_ = g.respond(name, true, options[0])
+		return
+	}
+	_ = g.respond(name, false, 0)
 }

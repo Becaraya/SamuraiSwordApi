@@ -264,7 +264,7 @@ func DiscardCards(c *gin.Context) {
 func GetMyPrivateState(c *gin.Context) {
 	currentGame := game.GetGameManager().GetCurrentGame()
 	if currentGame == nil {
-		c.JSON(http.StatusOK, game.PrivateState{Hand: []game.Card{}, Plays: []game.Play{}, ParryCards: []int{}})
+		c.JSON(http.StatusOK, game.PrivateState{Hand: []game.Card{}, Plays: []game.Play{}, ResponseCards: []int{}})
 		return
 	}
 	c.JSON(http.StatusOK, currentGame.PrivateState(c.GetString("username")))
@@ -286,26 +286,27 @@ func GetTargets(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"targets": targets})
 }
 
-// PlayWeapon annonce une attaque avec l'arme à l'indice `card` de la main
+// PlayWeapon joue la carte à l'indice `card` (cible et option facultatives selon la carte)
 func PlayWeapon(c *gin.Context) {
 	username := c.GetString("username")
 	var body struct {
 		Card   int    `json:"card"`
 		Target string `json:"target"`
+		Option string `json:"option"`
 	}
 	currentGame := game.GetGameManager().GetCurrentGame()
 	if err := c.ShouldBindJSON(&body); err != nil || currentGame == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
-	if err := currentGame.PlayWeapon(username, body.Card, body.Target); err != nil {
+	if err := currentGame.PlayCard(username, body.Card, body.Target, body.Option); err != nil {
 		turnError(c, err)
 		return
 	}
 
 	broadcastGameUpdate("attack", username)
 	scheduleBotTurns()
-	c.JSON(http.StatusOK, gin.H{"message": "Attack announced", "game": currentGame})
+	c.JSON(http.StatusOK, gin.H{"message": "Card played", "game": currentGame})
 }
 
 // RespondToAttack permet à la cible de parer (carte `card`) ou de subir l'attaque

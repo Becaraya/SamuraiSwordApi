@@ -54,7 +54,7 @@ func (g *Game) refresh() {
 	g.syncPiles()
 }
 
-// beginTurn résout les phases automatiques (récupération, pioche) puis ouvre la phase de jeu.
+// beginTurn résout la récupération (et le Code du Bushido), puis la pioche et ouvre la phase de jeu.
 func (g *Game) beginTurn(p *Player) {
 	g.Active = p.Name
 	g.Played = 0
@@ -64,7 +64,14 @@ func (g *Game) beginTurn(p *Player) {
 		p.Life = p.MaxLife
 		g.logf("info", "%s récupère tous ses PV.", p.Name)
 	}
+	if g.bushidoStep(p) {
+		g.refresh()
+		return
+	}
+	g.drawPhase(p)
+}
 
+func (g *Game) drawPhase(p *Player) {
 	g.Phase = PhaseDraw
 	n := 2
 	if p.Character != nil && p.Character.ID == "hideyoshi" {
@@ -119,6 +126,7 @@ func (g *Game) finish(reason string) {
 	for _, p := range g.Players {
 		p.PublicRole = p.Role
 	}
+	g.computeResults(reason)
 }
 
 func (g *Game) nextTurn() {
@@ -152,7 +160,7 @@ func (g *Game) EndTurn(name string) error {
 	if err := g.checkTurn(name, PhasePlay); err != nil {
 		return err
 	}
-	if g.Pending != nil {
+	if g.busy() {
 		return ErrAttackPending
 	}
 	if len(g.Players[name].Hand) > MaxHandSize {

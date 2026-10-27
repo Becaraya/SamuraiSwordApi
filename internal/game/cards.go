@@ -52,6 +52,7 @@ var (
 	rolePrep    map[string]map[string]int
 	honorSetup  map[string][2]int // [honneur du Shogun, honneur des autres]
 	handSizes   []int
+	roleMult    map[string]map[string]any // rôle -> nombre de joueurs -> multiplicateur (nombre, "etoiles" ou null)
 	loadFailure error
 )
 
@@ -77,10 +78,11 @@ func loadData() {
 	}
 	var rawRoles struct {
 		Roles []struct {
-			ID    string `json:"id"`
-			Name  string `json:"nom"`
-			Camp  string `json:"camp"`
-			Stars int    `json:"etoiles"`
+			ID    string         `json:"id"`
+			Name  string         `json:"nom"`
+			Camp  string         `json:"camp"`
+			Stars int            `json:"etoiles"`
+			Mult  map[string]any `json:"multiplicateur_score"`
 		} `json:"roles"`
 		Setup map[string]struct {
 			Roles       map[string]int `json:"roles"`
@@ -116,6 +118,10 @@ func loadData() {
 	}
 	for _, r := range rawRoles.Roles {
 		roles = append(roles, Role{ID: r.ID, Name: r.Name, Camp: r.Camp, Stars: r.Stars})
+		if roleMult == nil {
+			roleMult = map[string]map[string]any{}
+		}
+		roleMult[r.ID] = r.Mult
 	}
 	rolePrep = make(map[string]map[string]int, len(rawRoles.Setup))
 	honorSetup = make(map[string][2]int, len(rawRoles.Setup))
